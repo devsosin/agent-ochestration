@@ -48,7 +48,7 @@ The user gives plain instructions ("스모크에 로그인 API 추가해", "블�
 ## How to report
 
 - State: done / failed / needs input, a one-line summary from `proj wait`/`proj status`, then `proj diff` highlights (files, commits).
-- Point to the worktree path for VS Code review. Never paste whole diffs into chat.
+- Point to the worktree path for VS Code review, written with `~` for the home directory as `proj` prints it (never the full `/Volumes/...` or `/Users/...` form). Never paste whole diffs into chat.
 - On `failed`: show the error line. `Not logged in` means the account token expired — tell the user to run `proj account add <alias>`; you cannot.
 
 ## Destructive actions need a yes in chat first

@@ -17,6 +17,7 @@ COMPOSE_FILE="$REPO_DIR/compose/project.yml"
 CTR_TASKS=/var/agent-hub/tasks
 
 die() { echo "proj: $*" >&2; exit 1; }
+tilde() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }  # for display only
 
 # --- names --------------------------------------------------------------------
 
@@ -177,7 +178,7 @@ EOF
   docker volume create cargo-registry >/dev/null
   docker volume create cargo-git >/dev/null
   dc "$name" up -d
-  echo "project '$name' ready: $dir (account $account, image $image)"
+  echo "project '$name' ready: $(tilde "$dir") (account $account, image $image)"
 }
 
 is_repo() { # true only for the top of a git checkout (not a folder inside one)
@@ -229,7 +230,7 @@ cmd_add() { # proj add <workspace> <repo-folder> [--repo URL|owner/name | --crea
   dir="$(project_var "$name" PROJECT_DIR)"
   ! is_repo "$dir" || die "$name is a single-repo project; proj add is for workspaces (proj new <name> --workspace)"
   fetch_repo "$dir/$sub" "$repo" "$create"
-  echo "added $sub to $name ($dir/$sub)"
+  echo "added $sub to $name ($(tilde "$dir/$sub"))"
   if uses_rust "$dir/$sub" && [ "$(project_var "$name" IMAGE)" = agent-hub:base ]; then
     if [ -z "$(running_tasks "$name")" ]; then
       set_var "$name" IMAGE agent-hub:rust && dc "$name" up -d >/dev/null 2>&1
@@ -293,7 +294,7 @@ $unsaved"
     rm -rf "$dir" "$HUB/tasks/$name"
     echo "removed $what"
   else
-    echo "removed. kept: $dir, $HUB/tasks/$name (proj rm --purge also deletes them)"
+    echo "removed. kept: $(tilde "$dir"), $(tilde "$HUB/tasks/$name") (proj rm --purge also deletes them)"
   fi
 }
 
@@ -609,7 +610,7 @@ launch() { # launch <task dir> [session id to resume]
   if ! is_repo "$workdir"; then
     sys="$sys This is a multi-repo workspace: each subfolder with its own .git is a separate repository. Commit in the repository you changed, on a new branch, never on its default branch."
   fi
-  sys="$sys Do not push or open pull requests unless the task asks. End with a short report: what changed, how you verified it, open questions."
+  sys="$sys Do not push or open pull requests unless the task asks. End with a short report: what changed, how you verified it, open questions. In the report, give file paths relative to the working directory, never absolute."
   rm -f "$d/exit" "$d/pid"
   echo "ACCOUNT=$(project_var "$project" ACCOUNT)" >> "$d/meta"   # usage is tracked per account
   ensure_up "$project"
@@ -694,7 +695,7 @@ cmd_status() {
   if [ -z "${1:-}" ]; then status_list "*"; return; fi
   d="$(task_dir "$1")"
   printf 'task     %s\nproject  %s\nstate    %s\nbranch   %s\nworkdir  %s\ncreated  %s\n' \
-    "$1" "$(meta "$d" PROJECT)" "$(task_state "$d")" "$(meta "$d" BRANCH)" "$(meta "$d" WORKDIR)" "$(meta "$d" CREATED)"
+    "$1" "$(meta "$d" PROJECT)" "$(task_state "$d")" "$(meta "$d" BRANCH)" "$(tilde "$(meta "$d" WORKDIR)")" "$(meta "$d" CREATED)"
   printf 'cost     %s USD, %s turns\n\n' "$(result_field "$d" total_cost_usd)" "$(result_field "$d" num_turns)"
   result_field "$d" result
   if [ -s "$d/stderr.log" ]; then echo; echo "--- stderr (tail)"; tail -5 "$d/stderr.log"; fi
@@ -765,7 +766,7 @@ cmd_diff() {
       git -C "$r" status --short
       git -C "$r" log --oneline --branches --not --remotes | head -5
     done
-    echo; echo "open: code $w"; echo "      vscode://vscode-remote/ssh-remote+macmini$w"
+    echo; echo "open: code $(tilde "$w")"; echo "      vscode://vscode-remote/ssh-remote+macmini$w"
     return
   fi
   echo "== uncommitted"; git -C "$w" status --short
@@ -774,7 +775,7 @@ cmd_diff() {
     echo "== diffstat $base...HEAD"; git -C "$w" diff --stat "$base...HEAD"
   fi
   echo
-  echo "open: code $w"
+  echo "open: code $(tilde "$w")"
   echo "      vscode://vscode-remote/ssh-remote+macmini$w"
 }
 
@@ -788,7 +789,7 @@ cmd_close() {
     # Refuses on uncommitted changes, so nothing is lost; the branch stays.
     git -C "$(dirname "$(dirname "$w")")" worktree remove "$w" \
       || die "worktree has uncommitted changes; commit or discard them first"
-    echo "removed worktree $w (branch $(meta "$d" BRANCH) kept)"
+    echo "removed worktree $(tilde "$w") (branch $(meta "$d" BRANCH) kept)"
   fi
   touch "$d/closed"
 }

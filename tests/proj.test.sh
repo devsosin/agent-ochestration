@@ -90,6 +90,9 @@ mkdir -p "$AGENT_HUB_HOME/usage"; sleep 1
 printf '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.02,"resetsAt":%s,"status":"allowed"}}}}\n' "$future" > "$AGENT_HUB_HOME/usage/acct.jsonl"
 check "newer probe result wins over task log" yes "$(usage_line acct | grep -q '5h 2%' && echo yes || echo no)"
 
+check "tilde shortens home paths" "~/Storage/agents/x" "$(tilde "$HOME/Storage/agents/x")"
+check "tilde keeps other paths" "/Volumes/other/x" "$(tilde /Volumes/other/x)"
+
 # Hub settings follow WORKSPACE_ROOT / AGENT_HUB_HOME.
 s="$(WORKSPACE_ROOT="$HOME/Storage" hub_settings)"
 check "hub settings: workspace read rule" yes "$(jq -e '.permissions.allow | index("Read(~/Storage/**)")' "$s" >/dev/null && echo yes || echo no)"
