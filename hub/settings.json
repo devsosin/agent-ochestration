@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(proj ls*)",
+      "Bash(proj status*)",
+      "Bash(proj logs*)",
+      "Bash(proj diff*)",
+      "Bash(proj task*)",
+      "Bash(proj reply*)",
+      "Bash(proj new*)",
+      "Bash(proj up*)",
+      "Bash(proj alias*)",
+      "Bash(proj add*)",
+      "Bash(proj image*)",
+      "Bash(proj close*)",
+      "Bash(proj wait*)",
+      "Bash(proj usage*)",
+      "Bash(proj model*)",
+      "Bash(git -C * log*)",
+      "Bash(git -C * diff*)",
+      "Bash(git -C * status*)",
+      "Bash(git -C * show*)",
+      "Bash(gh repo view*)",
+      "Bash(gh repo list*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr diff*)",
+      "Read(~/workspace/**)",
+      "Read(~/.agent-hub/tasks/**)"
+    ],
+    "deny": [
+      "Read(~/.agent-hub/accounts/**)",
+      "Bash(proj account add*)",
+      "Bash(docker*)",
+      "Bash(echo y*)",
+      "Bash(yes*)"
+    ],
+    "additionalDirectories": ["~/workspace", "~/.agent-hub/tasks"]
+  }
+}

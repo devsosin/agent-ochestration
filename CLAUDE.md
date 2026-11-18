@@ -15,6 +15,7 @@ mac-agent/
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
 │   └── gitconfig            # gh credential helper, ssh→https rewrite, safe.directory
 ├── compose/project.yml      # one compose project per registered project (proj-<name>)
+├── hub/                     # main agent: CLAUDE.md (its operating guide, linked into ~/.agent-hub/hub) + settings.json (permissions)
 ├── tests/proj.test.sh       # unit checks for bin/proj helpers
 └── docs/                    # Korean, compact: architecture, accounts, proj, setup-macmini
 ```
@@ -27,6 +28,10 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/accounts/<alias>/` | `claude.token`, `gh.token`, `git.env` — secrets, mode 700/600 |
 | `~/.agent-hub/projects/<name>.env` | compose variables for one project |
 | `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container) |
+| `~/.agent-hub/usage/<alias>.jsonl` | latest rate-limit probe result per account (`proj usage --refresh`) |
+| `~/.agent-hub/idle.log` | `proj idle` runs from launchd (`com.agent-hub.idle`) |
+| `~/.agent-hub/hub/` | hub working dir (`CLAUDE.md` symlink, `hub.log`); launchd: `~/Library/LaunchAgents/com.agent-hub.hub.plist` |
+| `~/.claude-<alias>/` | host Claude config per account (full login, used by the hub) |
 | `~/workspace/<name>/` | project checkout; task worktrees in `.worktrees/<id>/` |
 | `~/workspace/harness/` | harness plugin source (`devsosin/harness`), mounted read-only |
 
@@ -38,6 +43,8 @@ Runtime state lives outside the repo (never commit it):
 
 ## 3. Rules
 
+- GitHub: repo creation and other admin actions use the host `gh` login (`proj new --create`); containers only get the account's fine-grained token without Administration.
+- `hub/settings.json` is the hub's permission boundary: widen it only with the user's agreement, and keep the deny on `~/.agent-hub/accounts/**`.
 - Project containers never get the Docker socket, host `~/.ssh`, or the hub's Claude login — whoever holds the socket controls every bind-mountable path under `/Users`.
 - Mount the project dir at the same absolute path in the container — git worktrees store absolute paths, and the host (VS Code, hub) must open worktrees the container created.
 - `bin/proj` must run on macOS `/bin/bash` 3.2: no `${x,,}`, associative arrays, `mapfile`.

@@ -52,6 +52,10 @@ proj new SosinCommerce-BE --image agent-hub:rust   # 기존 폴더를 등록하�
 bash ~/workspace/mac-agent/tests/proj.test.sh
 ```
 
+메인 에이전트: [proj.md](proj.md) "메인 에이전트"의 1~5 순서대로.
+
+유휴 컨테이너 자동 중지: `proj idle install 3` (30분마다, 3시간 쉰 컨테이너 중지. 로그 `~/.agent-hub/idle.log`).
+
 ## 6. 확인
 
 - 밖에서 폰 핫스팟 + Tailscale로 `ssh macmini` → `proj ls`.
