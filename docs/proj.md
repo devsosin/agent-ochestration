@@ -1,6 +1,6 @@
 # proj 명령
 
-`bin/proj` — 맥미니 호스트에서 실행한다. PATH에 `~/workspace/mac-agent/bin`을 추가해 두면 `proj`로 쓴다.
+`bin/proj` — 맥미니 호스트에서 실행한다. 저장소의 `bin`을 PATH에 추가해 두면 `proj`로 쓴다.
 
 ## 명령
 
@@ -8,7 +8,7 @@
 |---|---|
 | `proj build` | 이미지 `agent-hub:base`, `agent-hub:rust` 빌드 (Claude Code 업데이트도 이것으로) |
 | `proj account add <alias>` / `ls` | 계정 토큰 저장 / 목록 ([accounts.md](accounts.md)) |
-| `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g]` | `~/workspace/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 `Cargo.toml`이 있을 때 rust |
+| `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g]` | `$WORKSPACE_ROOT/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 `Cargo.toml`이 있을 때 rust |
 | `proj new <name> --create [--public]` | 위와 같이 새로 만들고, 호스트 `gh`로 GitHub 저장소(기본 비공개)를 만들어 `origin`으로 push |
 | `proj new <name> --workspace` | 여러 저장소를 담는 빈 워크스페이스 폴더 (루트는 git 저장소가 아님) |
 | `proj add <ws> <folder> [--repo URL\|owner/name \| --create [--public]]` | 워크스페이스에 저장소 추가: clone 또는 새로 만들기(+GitHub). Rust 저장소면 이미지를 rust로 전환 |
@@ -50,7 +50,7 @@
 
 ## 메인 에이전트 (hub)
 
-호스트에서 `claude remote-control`로 상시 대기하며, 폰·브라우저 채팅으로 받은 지시를 `proj`로 나눠 맡긴다. 운영 지침은 `hub/CLAUDE.md`, 권한은 `hub/settings.json`(proj·읽기 전용 git/gh만 허용, 계정 폴더 읽기와 docker 직접 실행 금지).
+호스트에서 `claude remote-control`로 상시 대기하며, 폰·브라우저 채팅으로 받은 지시를 `proj`로 나눠 맡긴다. 운영 지침은 `hub/CLAUDE.md`, 권한은 `hub/settings.json`(proj·읽기 전용 git/gh만 허용, 계정 폴더 읽기와 docker 직접 실행 금지). `proj hub run`이 그 안의 `~/workspace`·`~/.agent-hub`를 설정한 경로로 바꿔 `~/.agent-hub/hub-settings.json`으로 넘긴다.
 
 | 순서 | 명령 | 비고 |
 |---|---|---|
@@ -82,7 +82,7 @@
 | `USAGE_MAX` | `0.95` (계정의 5시간·7일 한도 중 하나라도 넘으면 새 작업 거부) | 〃 |
 | `IDLE_HOURS` | `3` (`proj idle` 기본값) | 〃 |
 | `USAGE_STALE` | `1800` (작업 시작 시 사용량 값이 이보다 오래됐으면 먼저 짧은 요청으로 갱신, 초) | 〃 |
-| `AGENT_HUB_HOME` | `~/.agent-hub` | 환경변수 |
+| `AGENT_HUB_HOME` | `~/.agent-hub` | 환경변수 (계정 토큰이 있으므로 동기화 폴더에 두지 않는다) |
 
 작업 기록: `~/.agent-hub/tasks/<name>/<id>/` — `prompt.txt`, `prompts.log`(지시 이력), `log.jsonl`, `stderr.log`, `meta`, `pid`, `exit`.
 

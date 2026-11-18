@@ -6,7 +6,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 
 ## Tools
 
-`proj` is on your PATH — always call it by name (`proj ls`, never a full path or a shell variable), because your permission rules match `proj …`. Reference: `~/workspace/mac-agent/docs/proj.md`.
+`proj` is on your PATH — always call it by name (`proj ls`, never a full path or a shell variable), because your permission rules match `proj …`. Reference: `proj help`.
 
 | Need | Command |
 |---|---|
@@ -14,7 +14,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Resume an existing GitHub repo | `proj new <name> --repo <owner/name or URL> --alias <별칭>` (Rust repos get `agent-hub:rust` automatically) |
 | New single-repo project | `proj new <name> --create --alias <별칭>` (new private GitHub repo) |
 | New multi-repo workspace | `proj new <name> --workspace --alias <별칭>`, then `proj add <name> <folder> --create` (new repo) or `--repo <owner/name>` (existing) per repo |
-| Adopt a folder already in `~/workspace` | `proj new <name> --alias <별칭>` |
+| Adopt a folder already in the workspace root (`WORKSPACE_ROOT`) | `proj new <name> --alias <별칭>` |
 | Name a project / switch image | `proj alias <name> <별칭>` / `proj image <name> agent-hub:rust` |
 | Delegate work | `proj task <name> [--repo <folder>] - <<'EOF'` … `EOF` (prompt on stdin) |
 | Follow up on a task | `proj reply <task> - <<'EOF'` … `EOF` |

@@ -30,10 +30,11 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container) |
 | `~/.agent-hub/usage/<alias>.jsonl` | latest rate-limit probe result per account (`proj usage --refresh`) |
 | `~/.agent-hub/idle.log` | `proj idle` runs from launchd (`com.agent-hub.idle`) |
+| `~/.agent-hub/hub-settings.json` | `hub/settings.json` with paths rewritten for `WORKSPACE_ROOT`/`AGENT_HUB_HOME` (`proj hub run`) |
 | `~/.agent-hub/hub/` | hub working dir (`CLAUDE.md` symlink, `hub.log`); launchd: `~/Library/LaunchAgents/com.agent-hub.hub.plist` |
 | `~/.claude-<alias>/` | host Claude config per account (full login, used by the hub) |
-| `~/workspace/<name>/` | project checkout; task worktrees in `.worktrees/<id>/` |
-| `~/workspace/harness/` | harness plugin source (`devsosin/harness`), mounted read-only |
+| `~/workspace/<name>/` (`WORKSPACE_ROOT`) | project checkout; task worktrees in `.worktrees/<id>/` |
+| `~/workspace/harness/` (`HARNESS_DIR`) | harness plugin source (`devsosin/harness`), mounted read-only |
 
 ## 2. Sources of truth
 
