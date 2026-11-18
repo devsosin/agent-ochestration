@@ -1,0 +1,12 @@
+[safe]
+	# Project dirs are bind-mounted from the host with a different owner uid.
+	directory = *
+[credential "https://github.com"]
+	helper =
+	helper = !gh auth git-credential
+[url "https://github.com/"]
+	# No SSH keys in containers; GitHub access goes through GH_TOKEN over https.
+	insteadOf = git@github.com:
+	insteadOf = ssh://git@github.com/
+[init]
+	defaultBranch = main

@@ -1,0 +1,8 @@
+#!/bin/sh
+# Runs claude with the account token from /run/secrets. Arguments go to claude unchanged.
+. /etc/profile.d/agent-hub.sh
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+  echo "agent-run: /run/secrets/claude_token is missing or empty (proj account add <alias>)" >&2
+  exit 2
+fi
+exec claude "$@"

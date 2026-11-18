@@ -1,0 +1,10 @@
+{
+  "extraKnownMarketplaces": {
+    "devsosin-harness": {
+      "source": { "source": "directory", "path": "/opt/harness" }
+    }
+  },
+  "enabledPlugins": {
+    "harness@devsosin-harness": true
+  }
+}
