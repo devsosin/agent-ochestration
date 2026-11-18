@@ -17,6 +17,7 @@
 | `proj usage [--refresh]` | 계정별 5시간·7일 한도 사용률과 초기화 시각. `--refresh`는 계정마다 아주 짧은 요청(Haiku, 약 900토큰)을 보내 최신 값을 받음 |
 | `proj idle [시간]` / `idle install [시간]` / `idle uninstall` | 작업·셸·활동이 없는 지 N시간(기본 3) 지난 컨테이너 중지. `install`은 30분마다 실행하도록 launchd 등록. 멈춘 컨테이너는 다음 작업이나 `proj up`에서 다시 켜짐 |
 | `proj hub init` / `login` / `run` / `install` / `uninstall` / `status` | 메인 에이전트 관리 (아래 "메인 에이전트") |
+| `proj imagegen install` / `uninstall` / `status` | 이미지 생성 MCP 서버를 launchd로 등록·해제·확인 (아래 "이미지 생성") |
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지) / 컨테이너 셸 |
@@ -61,6 +62,18 @@
 | 5 | `proj hub install` | launchd 등록 (로그인 시 시작, 꺼지면 30초 후 재시작). 로그: `~/.agent-hub/hub/hub.log` |
 
 접속: claude.ai/code 또는 Claude 앱의 세션 목록에서 `hub`.
+
+## 이미지 생성 (imagegen)
+
+| 항목 | 내용 |
+|---|---|
+| 구성 | 호스트의 `imagegen/server.py`(MCP, Python 표준 라이브러리)가 호스트 Codex CLI의 ChatGPT 로그인으로 이미지를 만든다. API 키 불필요 |
+| 접속 | `127.0.0.1:7801`. 컨테이너는 `host.docker.internal:7801`(이미지의 `/etc/agent-hub/mcp.json`, 작업마다 `--mcp-config`) |
+| 도구 | `generate_image(prompt)` → 결과 URL. 에이전트가 `curl -o <경로> <URL>`로 프로젝트에 저장. 파일은 24시간 보관 (`~/.agent-hub/imagegen/`) |
+| 안전 | Codex는 읽기 전용 sandbox에 셸·앱·플러그인 도구를 끄고 실행 → 프롬프트로 할 수 있는 건 이미지 생성뿐. 한 번에 하나씩 |
+| 비용 | 한 장 약 20초, Codex 약 2.8만 토큰(대부분 캐시) + ChatGPT 플랜의 이미지 한도 |
+| 준비 | 호스트에서 `codex login`(ChatGPT) → `proj imagegen install`. 이미지에 MCP 설정이 들어가므로 처음 한 번 `proj build` 후 `proj up <name>` |
+| 로그 | `~/.agent-hub/imagegen.log` |
 
 ## 상태
 

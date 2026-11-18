@@ -23,6 +23,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Finish a task | `proj close <task>` (keeps the branch) |
 | Subscription usage per account (5h / 7d) | `proj usage` |
 | Model for a project's tasks | `proj model <name> <model>` / `proj model <name> -` (default) |
+| Image generation for a project | Nothing to set up: project agents have the `imagegen` MCP tool (`generate_image`). Mention it in the prompt ("generate the image with the imagegen MCP tool and save it to …"). Check `proj imagegen status` if it fails |
 | Move a project to another account | `proj account use <name> <alias>` — only after the user says yes (it may spend another plan's credits) |
 
 Read-only git and gh for context: `git -C <dir> log|diff|status|show`, `gh repo view|list`, `gh pr list|view|diff`.

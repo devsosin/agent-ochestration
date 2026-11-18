@@ -5,4 +5,5 @@ if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   echo "agent-run: /run/secrets/claude_token is missing or empty (proj account add <alias>)" >&2
   exit 2
 fi
-exec claude "$@"
+# imagegen MCP on the host (proj imagegen); if it is down, claude just reports the server as failed.
+exec claude --mcp-config /etc/agent-hub/mcp.json "$@"

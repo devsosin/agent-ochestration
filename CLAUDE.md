@@ -11,12 +11,15 @@ mac-agent/
 ├── bin/proj                 # CLI: projects, accounts, tasks (bash 3.2-compatible)
 ├── image/                   # Agent image: Dockerfile (targets base, rust) + files copied into it
 │   ├── managed-settings.json  # registers harness marketplace (/opt/harness) and enables the plugin
-│   ├── agent-run            # loads token secrets, then execs claude
+│   ├── agent-run            # loads token secrets, then execs claude with mcp.json
+│   ├── mcp.json             # imagegen MCP at host.docker.internal:7801
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
 │   └── gitconfig            # gh credential helper, ssh→https rewrite, safe.directory
 ├── compose/project.yml      # one compose project per registered project (proj-<name>)
+├── imagegen/server.py       # image MCP on the host (Codex CLI with the host's ChatGPT login), stdlib Python
 ├── hub/                     # main agent: CLAUDE.md (its operating guide, linked into ~/.agent-hub/hub) + settings.json (permissions)
 ├── tests/proj.test.sh       # unit checks for bin/proj helpers
+├── tests/imagegen.test.sh   # imagegen server against a fake codex
 └── docs/                    # Korean, compact: architecture, accounts, proj, setup-macmini
 ```
 
@@ -29,6 +32,7 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/projects/<name>.env` | compose variables for one project |
 | `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container) |
 | `~/.agent-hub/usage/<alias>.jsonl` | latest rate-limit probe result per account (`proj usage --refresh`) |
+| `~/.agent-hub/imagegen/`, `imagegen.log` | generated images (24 h) and log of `proj imagegen run` (launchd `com.agent-hub.imagegen`) |
 | `~/.agent-hub/idle.log` | `proj idle` runs from launchd (`com.agent-hub.idle`) |
 | `~/.agent-hub/hub-settings.json` | `hub/settings.json` with paths rewritten for `WORKSPACE_ROOT`/`AGENT_HUB_HOME` (`proj hub run`) |
 | `~/.agent-hub/hub/` | hub working dir (`CLAUDE.md` symlink, `hub.log`); launchd: `~/Library/LaunchAgents/com.agent-hub.hub.plist` |
@@ -57,6 +61,7 @@ Runtime state lives outside the repo (never commit it):
 
 ```bash
 bash tests/proj.test.sh                 # helper unit checks
+bash tests/imagegen.test.sh             # imagegen MCP server (fake codex)
 bin/proj build                          # builds agent-hub:base and agent-hub:rust
 ```
 

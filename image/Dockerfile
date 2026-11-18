@@ -19,6 +19,7 @@ COPY managed-settings.json /etc/claude-code/managed-settings.json
 COPY gitconfig /etc/gitconfig
 COPY profile.sh /etc/profile.d/agent-hub.sh
 COPY agent-run /usr/local/bin/agent-run
+COPY mcp.json /etc/agent-hub/mcp.json
 RUN chmod 755 /usr/local/bin/agent-run \
  && echo '. /etc/profile.d/agent-hub.sh' >> /etc/bash.bashrc \
  # Mount points owned by node so named volumes copy that ownership on first mount.

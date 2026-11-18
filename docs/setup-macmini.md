@@ -89,6 +89,15 @@ proj hub status               # state = running
 proj idle install 3           # 30분마다 3시간 쉰 컨테이너 중지 (로그 ~/.agent-hub/idle.log)
 ```
 
+이미지 생성 MCP (ChatGPT Plus 로그인 사용, [proj.md](proj.md) "이미지 생성"):
+
+```bash
+brew install codex            # 또는 npm i -g @openai/codex
+codex login                   # "Sign in with ChatGPT" → 브라우저 로그인
+proj imagegen install         # launchd 등록 (127.0.0.1:7801)
+proj imagegen status          # imagegen: up
+```
+
 `hub run`을 터미널에서 한 번 먼저 하는 이유: 폴더 신뢰와 Remote Control 활성화는 터미널에서만 답할 수 있고, launchd로 띄우면 묻지 못하고 종료한다.
 
 ## 7. 프로젝트 옮기기

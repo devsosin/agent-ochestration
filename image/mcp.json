@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "imagegen": { "type": "http", "url": "http://host.docker.internal:7801/mcp" }
+  }
+}

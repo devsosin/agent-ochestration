@@ -807,6 +807,7 @@ proj — per-project agent containers (docs/proj.md)
   proj usage [--refresh]                      5h / 7d limit usage per account
   proj idle [hours] | install [hours] | uninstall   stop idle containers (default 3h)
   proj hub init|login|run|install|uninstall|status   main agent on the host (Remote Control)
+  proj imagegen install|uninstall|status|run         image MCP for containers (host Codex login)
   proj alias <name> <별칭>                  set the alias the hub matches (e.g. 스모크)
   proj ls | up <name> | down <name> | shell <name>
   proj rm <name> [--purge] [--yes]         --purge also deletes the folder and task records
@@ -816,10 +817,33 @@ proj — per-project agent containers (docs/proj.md)
 EOF
 }
 
+# --- imagegen (MCP server on the host, uses the host's Codex ChatGPT login) ---------
+IMAGEGEN_PORT=7801  # same port in image/mcp.json
+cmd_imagegen() { # proj imagegen run [codex] | install | uninstall | status
+  case "${1:-status}" in
+    run)
+      IMAGEGEN_PORT="$IMAGEGEN_PORT" IMAGEGEN_DIR="$HUB/imagegen" CODEX_BIN="${2:-codex}" \
+        exec /usr/bin/python3 "$REPO_DIR/imagegen/server.py" ;;
+    install)
+      local codex; codex="$(command -v codex || true)"
+      [ -n "$codex" ] || die "codex CLI not found (install it, then: codex login)"
+      "$codex" login status 2>&1 | grep -q ChatGPT || die "codex is not logged in with ChatGPT: run codex login"
+      install_agent com.agent-hub.imagegen "$HUB/imagegen.log" \
+        '<key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>30</integer>' \
+        "$REPO_DIR/bin/proj" imagegen run "$codex"
+      echo "imagegen on 127.0.0.1:$IMAGEGEN_PORT (containers: host.docker.internal). log: $HUB/imagegen.log" ;;
+    uninstall) uninstall_agent com.agent-hub.imagegen ;;
+    status)
+      curl -fsS -m 3 "http://127.0.0.1:$IMAGEGEN_PORT/health" >/dev/null 2>&1 && echo "imagegen: up (port $IMAGEGEN_PORT)" || echo "imagegen: down"
+      [ ! -f "$HUB/imagegen.log" ] || tail -5 "$HUB/imagegen.log" ;;
+    *) die "usage: proj imagegen run|install|uninstall|status" ;;
+  esac
+}
+
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
-    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|diff|close|hub) "cmd_$cmd" "$@" ;;
+    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|diff|close|hub|imagegen) "cmd_$cmd" "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 1 ;;
   esac

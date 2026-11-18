@@ -30,6 +30,7 @@ Mac mini
 | Docker 소켓 | 넣지 않음 | 소켓을 가진 쪽은 `/Users` 아래 무엇이든 마운트할 수 있음 |
 | 호스트 `~/.ssh`, 키체인 | 넣지 않음 | git은 `GH_TOKEN`(https)으로만 |
 | Claude 인증 | `setup-token` 토큰만 | 모델 호출만 가능. 정식 로그인은 호스트에만 |
+| OpenAI(Codex) 로그인 | 넣지 않음 | 호스트 imagegen MCP만 사용. 컨테이너는 이미지 URL만 받음 |
 | 권한 모드 | `bypassPermissions` (non-root) | 컨테이너가 경계. 네트워크 송신 제한은 아직 없음 (TBD) |
 
 ## 결정 기록
@@ -50,6 +51,7 @@ Mac mini
 | 2026-11-18 | 사용량: 작업 로그의 `rate_limit_event`로 계정별 5h·7d 사용률 추적, 95% 이상이면 새 작업 거부. 계정·모델은 프로젝트별로 중간에 변경 | 사용자 요청. 별도 API 없이 claude 출력만 사용 |
 | 2026-11-18 | SeaDrive는 설정·이미지 공유용. 코드 동기화에 쓰지 않음 | 코드는 맥미니에만 두고 SSH로 직접 봄 |
 | 2026-11-18 | 이미지 생성은 별도 서비스(MCP)로 제공, OpenAI 인증은 그 서비스에만 | 로그인 토큰 동시 갱신 충돌·노출 방지 (3단계) |
+| 2026-11-18 | imagegen: 호스트 MCP 서버가 호스트 Codex의 ChatGPT(Plus) 로그인으로 생성, Codex는 셸 없이 읽기 전용, 결과는 URL로 내려받기 | 사용자가 API 키 대신 구독 OAuth를 원함. 별도 컨테이너·로그인 없이 호스트 하나만 인증 보유 |
 
 ## 단계
 
@@ -57,7 +59,8 @@ Mac mini
 |---|---|---|
 | 1 | 이미지, compose, `proj` (new·task·reply·status·logs·diff·close), 계정 | 완료 (MacBook OrbStack에서 실제 토큰으로 확인) |
 | 2 | 통합 에이전트: `hub/CLAUDE.md`·`hub/settings.json`, `proj hub` (Remote Control 서버 모드, launchd), `proj new --create` | 구현. MacBook에서 확인: 웹·폰 Remote Control, 말로 지시 → `--create` 비공개 저장소 → 작업 커밋 → push·PR. launchd 등록은 맥미니에서 |
-| 3 | `proj test` (테스트 스택), imagegen MCP, 작업 대기열 | 예정 |
+| 3 | imagegen MCP | 구현. MacBook에서 확인: 실제 생성, Claude Code 연결, 컨테이너에서 내려받기. 맥미니 등록은 미확인 |
+| 3+ | `proj test` (테스트 스택), 작업 대기열 | 예정 |
 | 4 | 필요 시 dind 사이드카, code-server, 네트워크 송신 제한 | 예정 |
 
 ## 미결정 (TBD)
