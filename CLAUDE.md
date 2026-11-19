@@ -10,7 +10,7 @@ Git repository: `devsosin/agent-ochestration` (public — never commit tokens, h
 mac-agent/
 ├── bin/proj                 # CLI: projects, accounts, tasks (bash 3.2-compatible)
 ├── image/                   # Agent image: Dockerfile (targets base, rust) + files copied into it
-│   ├── managed-settings.json  # registers harness marketplace (/opt/harness) and enables the plugin
+│   ├── managed-settings.json  # default managed settings (harness on); bin/proj copies it per project
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
 │   ├── mcp.json             # imagegen MCP at host.docker.internal:7801
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
@@ -32,6 +32,8 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/config` | optional overrides: `WORKSPACE_ROOT`, `HARNESS_DIR`, `DEFAULT_ACCOUNT`, `MAX_TASKS` |
 | `~/.agent-hub/accounts/<alias>/` | `claude.token`, `gh.token`, `git.env` — secrets, mode 700/600 |
 | `~/.agent-hub/projects/<name>.env` | compose variables for one project |
+| `~/.agent-hub/projects/<name>.managed-settings.json` | that project's plugins + `env` (`proj plugin`), mounted read-only at `/etc/claude-code/managed-settings.json` |
+| `~/.agent-hub/plugins/<marketplace>/` | plugin marketplace clones (`proj plugin source add`), mounted read-only at `/opt/plugins` |
 | `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container), `transcript.md` (built on the host, `proj transcript`) |
 | `~/.agent-hub/sessions/<name>/` | Claude Code session files of that project's container (bind mount of `/home/node/.claude/projects`), source of `transcript.md` |
 | `~/.agent-hub/usage/<alias>.jsonl` | latest rate-limit probe result per account (`proj usage --refresh`) |

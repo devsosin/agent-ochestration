@@ -19,6 +19,7 @@ RUN apt-get update \
 
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
 
+# Fallback only: compose mounts each project's own file here (proj plugin), which bin/proj starts from this one.
 COPY managed-settings.json /etc/claude-code/managed-settings.json
 COPY gitconfig /etc/gitconfig
 COPY profile.sh /etc/profile.d/agent-hub.sh

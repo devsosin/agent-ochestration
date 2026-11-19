@@ -18,6 +18,8 @@
 | `proj idle [시간]` / `idle install [시간]` / `idle uninstall` | 작업·셸·활동이 없는 지 N시간(기본 3) 지난 컨테이너 중지. 에이전트가 띄운 컨테이너(DB 등)는 활동으로 보지 않고 함께 멈춤. `install`은 30분마다 실행하도록 launchd 등록. 멈춘 컨테이너는 다음 작업이나 `proj up`에서 다시 켜짐 |
 | `proj hub init` / `login` / `run` / `install` / `uninstall` / `status` | 메인 에이전트 관리 (아래 "메인 에이전트") |
 | `proj imagegen install` / `uninstall` / `status` | 이미지 생성 MCP 서버를 launchd로 등록·해제·확인 (아래 "이미지 생성") |
+| `proj plugin source add <owner/repo\|URL>` / `update [marketplace]` / `ls` | 플러그인 마켓플레이스 저장소를 `~/.agent-hub/plugins/<marketplace.json의 name>/`에 clone / `git pull --ff-only` / 목록 (아래 "플러그인") |
+| `proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE …]` / `rm <plugin@marketplace>` / `ls` | 그 프로젝트에서 플러그인 켜기(옵션은 `env`, `KEY=`는 그 키 삭제) / 끄기 / 목록. `proj plugin ls`는 모든 프로젝트 |
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지. 에이전트가 띄운 컨테이너는 멈추기만) / 컨테이너 셸 |
@@ -90,6 +92,17 @@
 | Testcontainers | `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`, Ryuk 끔(소켓 마운트가 필요해서). 남은 컨테이너는 `proj down`·`rm`이 라벨로 정리 |
 | 준비 | 이 기능 이전에 만든 프로젝트는 `proj build` 후 `proj up <name>` (프록시 서비스 추가) |
 
+## 플러그인
+
+| 항목 | 내용 |
+|---|---|
+| 소스 | `proj plugin source add DietrichGebert/ponytail` → `~/.agent-hub/plugins/ponytail/` (`owner/repo`는 호스트 `gh`, URL은 `git clone`). 모든 컨테이너에 `/opt/plugins`로 읽기 전용 마운트 |
+| 켜기 | `proj plugin app add ponytail@ponytail --env PONYTAIL_DEFAULT_MODE=full`. 이름은 `<플러그인>@<marketplace.json의 name>`. harness는 `harness@devsosin-harness`(기본 켬) |
+| 설정 파일 | `~/.agent-hub/projects/<name>.managed-settings.json` (jq로 생성: `extraKnownMarketplaces`, `enabledPlugins`, `env`) → `/etc/claude-code/managed-settings.json:ro`. 없으면 `proj new`·`up`·다음 작업에서 `image/managed-settings.json` 기본값(harness만)으로 만듦 |
+| 반영 | 다음 `claude -p` 작업부터, 컨테이너 재시작 없음 (파일을 같은 inode에 덮어써 실행 중 컨테이너에도 바로 보임. OrbStack에서 확인). 처음 쓸 때 `CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1`로 Claude 설정 볼륨에 설치, 신뢰 확인 없음 |
+| 갱신 | `proj plugin source update [marketplace]` — 컨테이너는 플러그인 코드를 바꿀 수 없음 |
+| 준비 | 이 기능 이전에 만든 프로젝트는 `proj up <name>` 한 번 (새 마운트 추가) |
+
 ## 상태
 
 | 상태 | 뜻 |
@@ -111,6 +124,8 @@
 | `IDLE_HOURS` | `3` (`proj idle` 기본값) | 〃 |
 | `USAGE_STALE` | `1800` (작업 시작 시 사용량 값이 이보다 오래됐으면 먼저 짧은 요청으로 갱신, 초) | 〃 |
 | `AGENT_HUB_HOME` | `~/.agent-hub` | 환경변수 (계정 토큰이 있으므로 동기화 폴더에 두지 않는다) |
+
+플러그인: `~/.agent-hub/plugins/<marketplace>/`, 프로젝트별 설정 `~/.agent-hub/projects/<name>.managed-settings.json` (`proj rm`이 함께 삭제).
 
 작업 기록: `~/.agent-hub/tasks/<name>/<id>/` — `prompt.txt`, `prompts.log`(지시 이력), `log.jsonl`, `stderr.log`, `meta`, `pid`, `exit`, `transcript.md`.
 

@@ -25,6 +25,9 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Subscription usage per account (5h / 7d) | `proj usage` |
 | Model for a project's tasks | `proj model <name> <model>` / `proj model <name> -` (default) |
 | Image generation for a project | Nothing to set up: project agents have the `imagegen` MCP tool (`generate_image`). Mention it in the prompt ("generate the image with the imagegen MCP tool and save it to …"). Check `proj imagegen status` if it fails |
+| Plugin marketplaces on the host | `proj plugin source add <owner/repo or URL>`, `proj plugin source update [marketplace]`, `proj plugin source ls` — run these yourself |
+| Plugins on in projects | `proj plugin ls` (all) |
+| Turn a plugin on/off for a project | `proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE]` / `proj plugin <name> rm <plugin@marketplace>` — only after the user says yes in chat (plugin hooks run code in that container). Say which plugin, project and options first |
 | Move a project to another account | `proj account use <name> <alias>` — only after the user says yes (it may spend another plan's credits) |
 
 Read-only git and gh for context: `git -C <dir> log|diff|status|show`, `gh repo view|list`, `gh pr list|view|diff`.
