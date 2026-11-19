@@ -181,4 +181,46 @@ printf '%s\n' '{"type":"system","subtype":"init","session_id":"s-c1"}' > "$td/lo
 check "reply switches the checkout back to the task branch" "agent/c1" "$( (launch() { :; }; cmd_reply c1 more) >/dev/null; git -C "$r" rev-parse --abbrev-ref HEAD)"
 rm -rf "$r" "$td"
 
+# transcript.md is built from Claude Code's session files ($HUB/sessions/<project>/, bind-mounted .claude/projects).
+td="$AGENT_HUB_HOME/tasks/demo/tr1"; mkdir -p "$td"; printf 'PROJECT=demo\n' > "$td/meta"
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"S1"}' '{"type":"system","subtype":"init","session_id":"S1"}' > "$td/log.jsonl"
+sd="$AGENT_HUB_HOME/sessions/demo/-Users-x-demo"; mkdir -p "$sd/S1/subagents"
+cat > "$sd/S1.jsonl" <<'EOF'
+{"type":"api-request","sessionId":"S1","timestamp":"2026-11-19T01:00:00.000Z","params":"SECRET-REQUEST"}
+{"type":"user","sessionId":"S1","uuid":"u1","timestamp":"2026-11-19T01:00:01.123Z","isSidechain":false,"message":{"role":"user","content":"fix the bug"}}
+{"type":"assistant","sessionId":"S1","uuid":"a1","timestamp":"2026-11-19T01:00:05.000Z","isSidechain":false,"message":{"content":[{"type":"thinking","thinking":"hidden thoughts"},{"type":"text","text":"Looking. key sk-ant-oat01-AbC_123-xyz"},{"type":"tool_use","id":"tu1","name":"Bash","input":{"command":"env\nls"}}]}}
+{"type":"user","sessionId":"S1","uuid":"u2","timestamp":"2026-11-19T01:00:06.000Z","isSidechain":false,"message":{"content":[{"type":"tool_result","tool_use_id":"tu1","content":"PATH=/bin\nGH_TOKEN=ghp_abcdef123456\nHOME=/home/node\nFOO=1"}]}}
+{"type":"assistant","sessionId":"S1","uuid":"a2","timestamp":"2026-11-19T01:00:07.000Z","isSidechain":false,"message":{"content":[{"type":"tool_use","id":"tu2","name":"Agent","input":{"subagent_type":"Explore","description":"find callers","prompt":"find callers of foo"}}]}}
+{"type":"user","sessionId":"S1","uuid":"u3","timestamp":"2026-11-19T01:00:20.000Z","isSidechain":false,"toolUseResult":{"agentId":"ag1","status":"completed"},"message":{"content":[{"type":"tool_result","tool_use_id":"tu2","content":[{"type":"text","text":"foo is called in bar.rs"}]}]}}
+{"type":"user","sessionId":"S1","uuid":"u4","timestamp":"2026-11-19T02:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"now add a test, token github_pat_11AAbb_cc"}}
+EOF
+cat > "$sd/S1/subagents/agent-ag1.jsonl" <<'EOF'
+{"type":"user","sessionId":"S1","agentId":"ag1","uuid":"s1","timestamp":"2026-11-19T01:00:08.000Z","isSidechain":true,"message":{"role":"user","content":"find callers of foo"}}
+{"type":"assistant","sessionId":"S1","agentId":"ag1","uuid":"s2","timestamp":"2026-11-19T01:00:09.000Z","isSidechain":true,"message":{"content":[{"type":"tool_use","id":"tu3","name":"Grep","input":{"pattern":"foo("}}]}}
+{"type":"assistant","sessionId":"S1","agentId":"ag1","uuid":"s3","timestamp":"2026-11-19T01:00:10.000Z","isSidechain":true,"message":{"content":[{"type":"text","text":"foo is called in bar.rs"}]}}
+EOF
+printf '%s\n' '{"type":"user","sessionId":"OTHER","uuid":"o1","timestamp":"2026-11-19T01:00:02.000Z","message":{"content":"another task"}}' > "$sd/OTHER.jsonl"
+t="$(TZ=Asia/Seoul transcript_md "$td")"
+check "transcript: prompt with local date and time" 1 "$(printf '%s\n' "$t" | grep -c '2026-11-19 10:00:01 · user')"
+check "transcript: main agent text" 1 "$(printf '%s\n' "$t" | grep -c '^Looking')"
+check "transcript: tool call on one line" 1 "$(printf '%s\n' "$t" | grep -c '→ Bash: env ls')"
+check "transcript: subagent named by type and description" 3 "$(printf '%s\n' "$t" | grep -c '· subagent Explore (find callers)')"
+check "transcript: subagent tool call" 1 "$(printf '%s\n' "$t" | grep -c '→ Grep: foo(')"
+check "transcript: ordered by time" "fix the bug|Looking|find callers of foo|now add a test" \
+  "$(printf '%s\n' "$t" | grep -oE '^(fix the bug|Looking|find callers of foo|now add a test)' | paste -sd '|' -)"
+check "transcript: tool result marked as tool" 1 "$(printf '%s\n' "$t" | grep -c "10:00:20 · tool")"
+check "transcript: short tool result kept" 1 "$(printf '%s\n' "$t" | grep -c "← foo is called in bar.rs")"
+check "transcript: long tool result (env dump) dropped" 0 "$(printf '%s\n' "$t" | grep -c 'HOME=/home/node')"
+check "transcript: tokens redacted" 0 "$(printf '%s\n' "$t" | grep -cE 'sk-ant-oat|ghp_abc|github_pat_11')"
+check "transcript: redaction marker" 2 "$(printf '%s\n' "$t" | grep -c '\[REDACTED\]')"
+check "transcript: no thinking, api requests, or other sessions" 0 "$(printf '%s\n' "$t" | grep -cE 'hidden thoughts|SECRET-REQUEST|another task')"
+check "transcript: proj transcript writes the file" yes "$(cmd_transcript tr1 >/dev/null && [ -s "$td/transcript.md" ] && echo yes || echo no)"
+echo 0 > "$td/exit"; touch -t 202001010000 "$td/transcript.md"
+transcript_fresh "$td"
+check "transcript: regenerated when the task finished after it" yes "$([ "$td/exit" -nt "$td/transcript.md" ] && echo no || echo yes)"
+check "transcript: missing sessions is an error" "no session records" "$( (rm -rf "$AGENT_HUB_HOME/sessions"; cmd_transcript tr1) 2>&1 | grep -o 'no session records' || true)"
+rm -f "$td/transcript.md"; transcript_fresh "$td"
+check "transcript: stub when there is nothing to read" 1 "$(grep -c 'No session records found' "$td/transcript.md")"
+rm -rf "$td"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

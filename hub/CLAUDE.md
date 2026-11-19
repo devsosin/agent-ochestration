@@ -20,6 +20,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Follow up on a task | `proj reply <task> - <<'EOF'` … `EOF` |
 | Wait for the result | `proj wait <task>` (blocks until it ends, up to 30 min) |
 | Progress / review | `proj status <task>`, `proj logs <task>`, `proj diff <task>` |
+| What an agent did, step by step (incl. subagents) | Read `~/.agent-hub/tasks/<project>/<task>/transcript.md` (local times, `agent`/`subagent …`/`user` lines, one-line tool calls). `proj status <task>` rebuilds it once the task has ended. Summarize; do not paste it whole |
 | Finish a task | `proj close <task>` (keeps the branch; a clean checkout goes back to the default branch) |
 | Subscription usage per account (5h / 7d) | `proj usage` |
 | Model for a project's tasks | `proj model <name> <model>` / `proj model <name> -` (default) |

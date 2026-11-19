@@ -23,12 +23,13 @@
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지. 에이전트가 띄운 컨테이너는 멈추기만) / 컨테이너 셸 |
-| `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨, 에이전트가 띄운 컨테이너·네트워크·볼륨(라벨 `agent-hub.project=<name>`, DB 데이터 포함) 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
+| `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨, 에이전트가 띄운 컨테이너·네트워크·볼륨(라벨 `agent-hub.project=<name>`, DB 데이터 포함) 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록·대화 기록(`sessions/<name>`)까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
 | `proj task <name> [--repo <folder>] [--worktree] <지시…\|->` | 체크아웃에 기본 브랜치에서 새 브랜치 `agent/<id>`를 만들고 `claude -p` 백그라운드 실행. `--worktree`는 `.worktrees/<id>`에서 실행(병렬용). 워크스페이스는 `--repo`로 저장소를 고르고, 없으면 루트에서 실행. `-`는 표준입력에서 지시를 읽음. `--here`는 예전 옵션(무시) |
 | `proj reply <task> <지시…\|->` | 같은 세션을 이어서 실행 (`--resume`). 체크아웃이 다른 브랜치로 옮겨 갔으면 변경이 없을 때 작업 브랜치로 다시 전환 |
-| `proj status [task\|name]` | 작업 목록(삭제된 프로젝트 제외) 또는 한 작업의 상태·비용·결과 보고 |
+| `proj status [task\|name]` | 작업 목록(삭제된 프로젝트 제외) 또는 한 작업의 상태·비용·결과 보고. 끝난 작업의 `transcript.md`가 없거나 종료보다 오래됐으면 이때 다시 만듦 |
 | `proj wait <task> [초]` | 작업이 끝날 때까지 기다렸다가 `status` 출력 (기본 1800초, 넘으면 종료 코드 3). 메인 에이전트는 이것으로 기다림 |
 | `proj logs <task> [-f]` | Claude의 메시지와 도구 호출 요약 (`-f` 실시간, 작업이 끝나면 멈춤) |
+| `proj transcript <task>` | 대화 기록 `transcript.md`를 지금 다시 만듦 (진행 중이면 그 시점까지). 아래 "대화 기록" |
 | `proj diff <task>` | 커밋 안 된 변경, base 이후 작업 브랜치 커밋, diffstat, VS Code로 여는 경로 |
 | `proj close <task>` | 체크아웃 작업: 아무것도 지우지 않음. 작업 브랜치에 있고 변경이 없으면 기본 브랜치로 돌아감. worktree 작업: worktree 삭제(브랜치 유지), 커밋 안 된 변경이 있으면 거부 |
 
@@ -126,7 +127,18 @@
 
 플러그인: `~/.agent-hub/plugins/<marketplace>/`, 프로젝트별 설정 `~/.agent-hub/projects/<name>.managed-settings.json` (`proj rm`이 함께 삭제).
 
-작업 기록: `~/.agent-hub/tasks/<name>/<id>/` — `prompt.txt`, `prompts.log`(지시 이력), `log.jsonl`, `stderr.log`, `meta`, `pid`, `exit`.
+작업 기록: `~/.agent-hub/tasks/<name>/<id>/` — `prompt.txt`, `prompts.log`(지시 이력), `log.jsonl`, `stderr.log`, `meta`, `pid`, `exit`, `transcript.md`.
+
+## 대화 기록 (transcript.md)
+
+| 항목 | 내용 |
+|---|---|
+| 원본 | Claude Code 세션 파일. 컨테이너의 `/home/node/.claude/projects`를 호스트 `~/.agent-hub/sessions/<name>/`에 바인드 마운트 (`<cwd 인코딩>/<session_id>.jsonl`, 서브에이전트는 같은 세션 ID로 기록된 파일). 나머지 Claude 설정은 볼륨 그대로 |
+| 만드는 때 | 작업이 끝난 뒤 `proj status`·`proj wait`가 볼 때(없거나 종료보다 오래됐으면), 또는 `proj transcript <task>` |
+| 내용 | 메시지마다 로컬 일시 · 화자(`user` 지시, `agent` 메인, `subagent <종류> (<설명>)`, `tool` 짧은 결과), 텍스트, 도구 호출 한 줄 요약(`→ Bash: …`). 시간순 |
+| 빼는 것 | thinking, API 요청 기록, 3줄·300자를 넘는 도구 결과(환경변수 출력 등). `sk-ant-`·`ghp_`·`github_pat_` 등 토큰과 `*TOKEN=`·`*SECRET=`·`*PASSWORD=`·`*API_KEY=` 값은 `[REDACTED]` |
+| `proj reply` | 그 작업의 모든 실행(세션 ID)을 모아 다시 만들므로 이어진 대화가 같은 파일에 뒤에 붙음 |
+| 준비 | 이 기능 이전에 만든 프로젝트는 `proj up <name>`으로 컨테이너를 다시 만들어야 마운트가 생김. 그 전 작업은 기록이 볼륨에만 있어 만들 수 없음 |
 
 ## 알려진 한계
 
