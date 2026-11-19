@@ -183,8 +183,15 @@ check "close switches a clean checkout back to main" "main" "$(git -C "$r" rev-p
 check "close keeps the task branch" yes "$(git -C "$r" rev-parse -q --verify agent/c1 >/dev/null && echo yes || echo no)"
 check "diff still shows the branch after close" 1 "$(cmd_diff c1 | grep -c 'task work')"
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"s-c1"}' > "$td/log.jsonl"
+check "reply without the session file is refused with --from hint" "--from c1" "$( (launch() { :; }; cmd_reply c1 more) 2>&1 | grep -o -- '--from c1' || true)"
+mkdir -p "$AGENT_HUB_HOME/sessions/demo/-x"; : > "$AGENT_HUB_HOME/sessions/demo/-x/s-c1.jsonl"
 check "reply switches the checkout back to the task branch" "agent/c1" "$( (launch() { :; }; cmd_reply c1 more) >/dev/null; git -C "$r" rev-parse --abbrev-ref HEAD)"
-rm -rf "$r" "$td"
+git -C "$r" switch -q main
+check "--from a task: new branch cut from its branch" "$(git -C "$r" rev-parse agent/c1)" "$(task_workdir "$r" c7 0 agent/c1 && echo "$BASE" >/dev/null && git -C "$r" rev-parse HEAD)"
+check "--from a task: own new branch" "agent/c7" "$(git -C "$r" rev-parse --abbrev-ref HEAD)"
+check "--from a task: old branch untouched" "$(git -C "$r" rev-parse main)" "$(git -C "$r" rev-parse agent/c1~1)"
+check "--from an unknown branch is refused" "no branch" "$( (task_workdir "$r" c8 0 agent/nope) 2>&1 | grep -o 'no branch' || true)"
+rm -rf "$r" "$td" "$AGENT_HUB_HOME/sessions/demo/-x"
 
 # transcript.md is built from Claude Code's session files ($HUB/sessions/<project>/, bind-mounted .claude/projects).
 td="$AGENT_HUB_HOME/tasks/demo/tr1"; mkdir -p "$td"; printf 'PROJECT=demo\n' > "$td/meta"
