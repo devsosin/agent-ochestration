@@ -744,6 +744,7 @@ launch() { # launch <task dir> [session id to resume]
   sys="You run inside an agent-hub project container. Task $id, working directory $workdir"
   if [ -n "$(meta "$d" BRANCH)" ]; then
     sys="$sys on branch $(meta "$d" BRANCH) (from $(meta "$d" BASE)). Commit your changes on this branch with clear messages; do not switch branches."
+    [ -z "$(meta "$d" FROM)" ] || sys="$sys $(meta "$d" BASE) holds earlier work on this topic from another session: read its git log and its diff against the default branch before you continue."
     sys="$sys If you split work across parallel subagents that edit files, give each one its own worktree (Agent tool isolation: \"worktree\") and merge their results into this branch."
   else
     sys="$sys on the checked-out branch. Do not commit unless the task asks."
@@ -783,7 +784,7 @@ default_branch() { # origin's default branch, else main/master, else the current
   git -C "$1" rev-parse --abbrev-ref HEAD
 }
 
-task_workdir() { # task_workdir <dir> <id> <worktree 0|1>: checks, then sets WORKDIR BRANCH BASE (git changes only after all checks)
+task_workdir() { # task_workdir <dir> <id> <worktree 0|1> [base branch]: checks, then sets WORKDIR BRANCH BASE (git changes only after all checks)
   local dir="$1" id="$2" wt="$3" t tw
   WORKDIR="$dir"; BRANCH=""; BASE=""
   if [ "$wt" = 0 ]; then
@@ -797,9 +798,11 @@ task_workdir() { # task_workdir <dir> <id> <worktree 0|1>: checks, then sets WOR
   fi
   is_repo "$dir" && git -C "$dir" rev-parse -q --verify HEAD >/dev/null 2>&1 || {
     [ "$wt" = 0 ] || die "--worktree needs a git repository with a commit"
+    [ -z "${4:-}" ] || die "--from needs a git repository; pick one with --repo <folder>"
     return 0   # workspace root or empty repo: in place, no branch
   }
-  BASE="$(default_branch "$dir")"; BRANCH="agent/$id"
+  BASE="${4:-$(default_branch "$dir")}"; BRANCH="agent/$id"
+  git -C "$dir" rev-parse -q --verify "refs/heads/$BASE" >/dev/null || die "no branch $BASE in $(tilde "$dir") (wrong --repo?)"
   for t in /.worktrees/ /.claude/worktrees/; do   # task and subagent worktrees stay out of git status
     grep -qxF "$t" "$dir/.git/info/exclude" 2>/dev/null || echo "$t" >> "$dir/.git/info/exclude"
   done
@@ -814,18 +817,23 @@ task_workdir() { # task_workdir <dir> <id> <worktree 0|1>: checks, then sets WOR
 }
 
 cmd_task() {
-  local name="${1:-}" wt=0 sub="" id dir d prompt WORKDIR BRANCH BASE
+  local name="${1:-}" wt=0 sub="" from="" id dir d prompt WORKDIR BRANCH BASE
   require_project "$name"; shift
   while :; do
     case "${1:-}" in
       --worktree) wt=1; shift ;;
       --here) shift ;;   # old flag: running in the checkout is now the default
       --repo) sub="${2:-}"; shift 2 ;;
+      --from) from="${2:-}"; shift 2 ;;   # task id or branch: new session on a new branch cut from it
       *) break ;;
     esac
   done
   if [ "${1:-}" = - ]; then prompt="$(cat)"; else prompt="$*"; fi
-  [ -n "$prompt" ] || die "usage: proj task <name> [--repo <folder>] [--worktree] <prompt...|->"
+  [ -n "$prompt" ] || die "usage: proj task <name> [--repo <folder>] [--worktree] [--from <task|branch>] <prompt...|->"
+  if [ -n "$from" ] && [ -d "$(task_dir "$from" 2>/dev/null || true)" ]; then
+    from="$(meta "$(task_dir "$from")" BRANCH)"
+    [ -n "$from" ] || die "task has no branch to continue from"
+  fi
   dir="$(project_var "$name" PROJECT_DIR)"
   if [ -n "$sub" ]; then
     dir="$dir/$sub"
@@ -834,13 +842,14 @@ cmd_task() {
   can_launch "$name"
   id="$(new_task_id)"
   d="$HUB/tasks/$name/$id"
-  task_workdir "$dir" "$id" "$wt"
+  task_workdir "$dir" "$id" "$wt" "$from"
 
   mkdir -p "$d"
   printf '%s\n' "$prompt" > "$d/prompt.txt"
   printf '## %s\n%s\n\n' "$(date '+%F %T')" "$prompt" > "$d/prompts.log"
   printf 'PROJECT=%s\nWORKDIR=%s\nBRANCH=%s\nBASE=%s\nCREATED=%s\n' \
     "$name" "$WORKDIR" "$BRANCH" "$BASE" "$(date '+%F %T')" > "$d/meta"
+  [ -z "$from" ] || echo "FROM=$from" >> "$d/meta"
   launch "$d"
 }
 
@@ -854,6 +863,9 @@ cmd_reply() {
   sid="$(session_id "$d")"
   [ -n "$sid" ] || die "$id has no session to resume (see $d/stderr.log)"
   w="$(meta "$d" WORKDIR)"; b="$(meta "$d" BRANCH)"
+  # Resume needs the session file and the folder it ran in; otherwise start fresh from the task's branch.
+  [ -d "$w" ] && [ -n "$(find "$HUB/sessions/$(meta "$d" PROJECT)" -name "$sid.jsonl" 2>/dev/null | head -1)" ] \
+    || die "cannot resume $id: its session or folder is gone. Start a new session from its branch: proj task $(meta "$d" PROJECT) --from $id <prompt>"
   if [ -n "$b" ] && [ -d "$w" ] && [ "$(git -C "$w" rev-parse --abbrev-ref HEAD)" != "$b" ]; then
     # Checkout task whose checkout moved on (proj close or a later task): resume on its own branch.
     for t in $(running_tasks); do
@@ -1073,7 +1085,7 @@ proj — per-project agent containers (docs/proj.md)
   proj alias <name> <별칭>                  set the alias the hub matches (e.g. 스모크)
   proj ls | up <name> | down <name> | shell <name>
   proj rm <name> [--purge] [--yes]         also deletes what the agent started in Docker; --purge: folder, task records
-  proj task <name> [--repo <folder>] [--worktree] <prompt...|->  run claude on a new branch agent/<id> in the checkout (--worktree: in .worktrees/<id>, for parallel work)
+  proj task <name> [--repo <folder>] [--worktree] [--from <task|branch>] <prompt...|->  run claude on a new branch agent/<id> in the checkout (--worktree: in .worktrees/<id>, for parallel work)
   proj reply <task> <prompt...|->          continue the task's session
   proj status [task|name] | wait <task> [secs] | logs <task> [-f] | diff <task> | close <task>
   proj transcript <task>                   (re)build the task's transcript.md (also done by status/wait once it ends)

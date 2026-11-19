@@ -80,6 +80,7 @@ Mac mini
 | 2026-11-19 | 대화 기록은 작업 폴더의 `transcript.md`(일시 포함)로 남긴다. 원본은 Claude Code 세션 파일: 컨테이너 `~/.claude/projects`만 `~/.agent-hub/sessions/<name>/`에 바인드 마운트하고, `proj`가 호스트에서 만든다. DB·컨테이너 안 스킬·스크립트는 쓰지 않음. 보관은 `proj rm --purge` 전까지 (#2) | 사후 확인용. 세션 기록에 줄마다 `timestamp`가 있고 서브에이전트 기록도 같은 곳에 남음. 에이전트가 직접 남기면 빠뜨리거나 토큰을 씀 (사용자 결정) |
 | 2026-11-19 | 작업은 체크아웃에서 기본 브랜치로부터 `agent/<id>`를 만들어 커밋. 커밋 안 된 변경이 있거나 같은 폴더에 실행 중인 작업이 있으면 거부. 워크스페이스 `--repo`도 같은 규칙. worktree는 `proj task --worktree`로 명시할 때만, 서브에이전트 병렬은 Claude Code worktree 격리(`isolation: worktree`) (#1) | 프로젝트당 에이전트 하나(1:1). VS Code에서 폴더 하나로 리뷰, worktree가 쌓이지 않음 (사용자 결정) |
 | 2026-11-19 | 플러그인은 호스트 `~/.agent-hub/plugins/`에 git clone해 모든 컨테이너에 읽기 전용으로 올리고, 프로젝트별 managed settings로 켜고 끈다. 옵션은 settings `env`, harness는 기본 켬(`rm`으로 끌 수 있음). 메인 에이전트는 `proj plugin source add`·`update`·`ls`를 바로 실행, 프로젝트별 `add`·`rm`은 사용자 승인 후 (#6) | 컨테이너 안에서 플러그인을 설치할 수 없다는 프로젝트 에이전트 보고. managed settings는 신뢰 확인이 없어 `claude -p`에서도 동작, 버전은 호스트에서 고정 (사용자 결정) |
+| 2026-11-19 | 이어서 작업: 같은 세션은 `proj reply`, 새 세션은 `proj task --from <task>`(그 작업 브랜치에서 새 브랜치). 세션이 없을 때 reply가 자동으로 새 세션을 만들지 않음. 예전 볼륨 세션은 사용자가 1회 수동 복사 (#11) | #8 전환 때 컨테이너 재생성으로 볼륨 세션이 가려져 reply가 실패한 사례. 다시 생기지 않는 1회성 원인 (사용자 결정) |
 
 ## 단계
 
