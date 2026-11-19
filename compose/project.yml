@@ -23,6 +23,7 @@ services:
       - ${HARNESS_DIR:?}:/opt/harness:ro
       - ${TASKS_DIR:?}:/var/agent-hub/tasks
       - claude-config:/home/node/.claude
+      - ${SESSIONS_DIR:?}:/home/node/.claude/projects  # session transcripts, readable on the host (bin/proj sets it)
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
     mem_limit: ${MEM_LIMIT:-6g}

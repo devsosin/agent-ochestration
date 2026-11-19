@@ -39,6 +39,8 @@ project_var() { # project_var <name> <KEY>
 
 dc() { # dc <name> <compose args...>
   local name="$1"; shift
+  # Claude Code's session files (bind-mounted ~/.claude/projects) for transcript.md; made here so Docker does not create it.
+  export SESSIONS_DIR="$HUB/sessions/$name"; mkdir -p "$SESSIONS_DIR"
   docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" "$@"
 }
 
@@ -294,7 +296,7 @@ cmd_rm() { # proj rm <name> [--purge] [--yes]
     unsaved="$(unsaved_work "$dir")"
     [ -z "$unsaved" ] || die "nothing removed — $dir has work that exists nowhere else:
 $unsaved"
-    what="$what, folder $dir, task records"
+    what="$what, folder $dir, task records and transcripts"
   fi
   if [ "$yes" = 0 ]; then
     # Piped input is not consent: a person answers at a terminal; an agent passes --yes after the user agreed.
@@ -306,7 +308,7 @@ $unsaved"
   dc "$name" down -v
   rm "$(env_file "$name")"
   if [ "$purge" = 1 ]; then
-    rm -rf "$dir" "$HUB/tasks/$name"
+    rm -rf "$dir" "$HUB/tasks/$name" "$HUB/sessions/$name"
     echo "removed $what"
   else
     echo "removed. kept: $(tilde "$dir"), $(tilde "$HUB/tasks/$name") (proj rm --purge also deletes them)"
@@ -566,7 +568,7 @@ cmd_idle() { # proj idle [hours] | install [hours] | uninstall
 
 # --- tasks --------------------------------------------------------------------
 # Task dir: $HUB/tasks/<project>/<id>/ — meta (KEY=value), prompt.txt, prompts.log, log.jsonl,
-# stderr.log, pid (pid inside the container), exit (written when claude ends).
+# stderr.log, pid (pid inside the container), exit (written when claude ends), transcript.md (built on the host).
 
 task_dir() { # task_dir <id> -> path, searching all projects
   local d
@@ -749,8 +751,10 @@ cmd_status() {
   if [ -n "${1:-}" ] && [ -f "$(env_file "$1")" ]; then status_list "$1"; return; fi
   if [ -z "${1:-}" ]; then status_list "*"; return; fi
   d="$(task_dir "$1")"
+  transcript_fresh "$d"
   printf 'task     %s\nproject  %s\nstate    %s\nbranch   %s\nworkdir  %s\ncreated  %s\n' \
     "$1" "$(meta "$d" PROJECT)" "$(task_state "$d")" "$(meta "$d" BRANCH)" "$(tilde "$(meta "$d" WORKDIR)")" "$(meta "$d" CREATED)"
+  [ ! -f "$d/transcript.md" ] || printf 'transcript %s\n' "$(tilde "$d/transcript.md")"
   printf 'cost     %s USD, %s turns\n\n' "$(result_field "$d" total_cost_usd)" "$(result_field "$d" num_turns)"
   result_field "$d" result
   if [ -s "$d/stderr.log" ]; then echo; echo "--- stderr (tail)"; tail -5 "$d/stderr.log"; fi
@@ -763,6 +767,7 @@ status_list() {
     [ -f "$d/meta" ] || continue
     d="${d%/}"
     [ -f "$(env_file "$(meta "$d" PROJECT)")" ] || continue   # project removed with `proj rm`
+    transcript_fresh "$d"
     printf '%-14s %-20s %-8s %s\n' "$(basename "$d")" "$(meta "$d" PROJECT)" "$(task_state "$d")" \
       "$(head -1 "$d/prompt.txt" | cut -c1-60)"
   done
@@ -786,6 +791,68 @@ cmd_logs() {
     [ -s "$d/log.jsonl" ] && jq -r "$filter" "$d/log.jsonl"
     [ ! -s "$d/stderr.log" ] || { echo "--- stderr"; cat "$d/stderr.log"; }
   fi
+}
+
+# transcript.md: the task's Claude sessions (main agent + subagents) as Markdown with local times, read from
+# Claude Code's own session files. The container's ~/.claude/projects is bind-mounted at $HUB/sessions/<project>.
+# A run ends inside the container, so the file is (re)built on the host: proj transcript, or proj status/wait once stale.
+TRANSCRIPT_JQ='
+  def clip: gsub("\\s+"; " ") | .[0:160];
+  def body: if type == "string" then . elif type == "array" then map(.text? // empty) | join("\n") else "" end;
+  [.[] | select((.type == "user" or .type == "assistant") and (.sessionId as $s | $sids | index($s)) and (.isMeta | not))]
+  | unique_by(.uuid) | sort_by(.timestamp)
+  | (map(.message.content | arrays | .[] | select(.type == "tool_use")
+         | {key: .id, value: ((.input.subagent_type // .name) + (if .input.description then " (\(.input.description))" else "" end))})
+     | from_entries) as $uses
+  | (map(select((.toolUseResult | objects | .agentId) != null)
+         | {key: .toolUseResult.agentId, value: $uses[.message.content[0].tool_use_id?]}) | from_entries) as $agents
+  | .[]
+  | (if .isSidechain then "subagent \($agents[.agentId // ""] // .agentId // "?")" elif .type == "assistant" then "agent"
+      elif ([.message.content | arrays | .[] | select(.type == "tool_result")] | length) > 0 then "tool" else "user" end) as $who
+  | (.message.content
+     | if type == "string" then .
+       else map(
+         if .type == "text" then .text
+         elif .type == "tool_use" then "→ \(.name): \(.input | (.command // .file_path // .pattern // .description // .prompt // .url // tostring) | clip)"
+         elif .type == "tool_result" then (.content | body) as $r
+           | if $r != "" and ($r | length) <= 300 and ($r | split("\n") | length) <= 3 then "← \($r | clip)" else empty end
+         else empty end) | join("\n") end) as $text
+  | select($text != "")
+  | "**\(.timestamp | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601 | strflocaltime("%Y-%m-%d %H:%M:%S")) · \($who)**\n\($text)\n"
+  | gsub("(sk-ant-|ghp_|gho_|ghs_|ghu_|github_pat_)[A-Za-z0-9_-]+"; "[REDACTED]")
+  | gsub("(?<k>[A-Z_]*(TOKEN|SECRET|PASSWORD|API_KEY))=[^\\s]+"; "\(.k)=[REDACTED]")'
+
+transcript_md() { # transcript_md <task dir>: prints the Markdown; fails when no session file is found
+  local d="$1" dir sids s
+  dir="$HUB/sessions/$(meta "$d" PROJECT)"
+  # Every run (first and each proj reply) logs its session id; a resume may keep or change it.
+  sids="$(jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$d/log.jsonl" 2>/dev/null | sort -u)"
+  [ -n "$sids" ] || return 1
+  set --
+  for s in $sids; do set -- "$@" -e "\"sessionId\":\"$s\""; done
+  # Every file holding a record of these sessions: main transcript and subagent transcripts alike.
+  [ -n "$(grep -rlF --include='*.jsonl' "$@" "$dir" 2>/dev/null | head -1)" ] || return 1
+  printf '# Task %s (%s)\n\n' "$(basename "$d")" "$(meta "$d" PROJECT)"
+  grep -rlF --null --include='*.jsonl' "$@" "$dir" \
+    | xargs -0 jq -rs --argjson sids "$(printf '%s\n' "$sids" | jq -R . | jq -s .)" "$TRANSCRIPT_JQ"
+}
+
+cmd_transcript() {
+  local d
+  [ -n "${1:-}" ] || die "usage: proj transcript <task>"
+  d="$(task_dir "$1")"
+  transcript_md "$d" > "$d/transcript.md.tmp" \
+    || { rm -f "$d/transcript.md.tmp"; die "no session records for $1 in $(tilde "$HUB/sessions/$(meta "$d" PROJECT)") (task started before the sessions mount? proj up $(meta "$d" PROJECT))"; }
+  mv "$d/transcript.md.tmp" "$d/transcript.md"
+  echo "$(tilde "$d/transcript.md")"
+}
+
+transcript_fresh() { # rebuilds transcript.md when the task finished after it was last written
+  [ -f "$1/exit" ] || return 0
+  [ ! -f "$1/transcript.md" ] || [ "$1/exit" -nt "$1/transcript.md" ] || return 0
+  # A stub when there is nothing to read (task ran before the sessions mount), so status does not search again each time.
+  (cmd_transcript "$(basename "$1")") >/dev/null 2>&1 \
+    || printf '# Task %s\n\nNo session records found. Retry: proj transcript %s\n' "$(basename "$1")" "$(basename "$1")" > "$1/transcript.md"
 }
 
 wait_task() { # wait_task <task dir> <timeout s>: returns 0 when finished, 3 on timeout
@@ -885,6 +952,7 @@ proj — per-project agent containers (docs/proj.md)
   proj task <name> [--repo <folder>] [--worktree] <prompt...|->  run claude on a new branch agent/<id> in the checkout (--worktree: in .worktrees/<id>, for parallel work)
   proj reply <task> <prompt...|->          continue the task's session
   proj status [task|name] | wait <task> [secs] | logs <task> [-f] | diff <task> | close <task>
+  proj transcript <task>                   (re)build the task's transcript.md (also done by status/wait once it ends)
 EOF
 }
 
@@ -914,7 +982,7 @@ cmd_imagegen() { # proj imagegen run [codex] | install | uninstall | status
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
-    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|diff|close|hub|imagegen) "cmd_$cmd" "$@" ;;
+    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|transcript|diff|close|hub|imagegen) "cmd_$cmd" "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 1 ;;
   esac
