@@ -15,6 +15,8 @@ USAGE_MAX="${USAGE_MAX:-0.95}"
 USAGE_STALE="${USAGE_STALE:-1800}"
 COMPOSE_FILE="$REPO_DIR/compose/project.yml"
 CTR_TASKS=/var/agent-hub/tasks
+PLUGINS_DIR="$HUB/plugins"           # marketplace clones, mounted read-only at /opt/plugins
+HARNESS_MARKET=devsosin-harness      # marketplace at /opt/harness (image/managed-settings.json)
 
 die() { echo "proj: $*" >&2; exit 1; }
 tilde() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }  # for display only
@@ -39,7 +41,10 @@ project_var() { # project_var <name> <KEY>
 
 dc() { # dc <name> <compose args...>
   local name="$1"; shift
-  docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" "$@"
+  ensure_settings "$name"; mkdir -p "$PLUGINS_DIR"   # missing bind sources would become empty directories
+  # Shell env beats --env-file, so projects made before these variables existed get them too.
+  MANAGED_SETTINGS="$(settings_file "$name")" PLUGINS_DIR="$PLUGINS_DIR" \
+    docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" "$@"
 }
 
 # Containers, volumes, networks the project's agent made through its Docker proxy (dockerproxy/server.py).
@@ -304,7 +309,7 @@ $unsaved"
   fi
   rm_started "$name"
   dc "$name" down -v
-  rm "$(env_file "$name")"
+  rm "$(env_file "$name")" "$(settings_file "$name")"
   if [ "$purge" = 1 ]; then
     rm -rf "$dir" "$HUB/tasks/$name"
     echo "removed $what"
@@ -337,6 +342,117 @@ cmd_alias() { # proj alias <name> <alias, e.g. 스모크>
   [ -n "$alias" ] && [ "$alias" = "$(printf '%s' "$alias" | tr -d '\n=')" ] || die "usage: proj alias <name> <alias>"
   set_var "$name" ALIAS "$alias"
   echo "$name = $alias"
+}
+
+# --- plugins ------------------------------------------------------------------
+# Marketplace repos are cloned on the host into $PLUGINS_DIR/<marketplace>/ and mounted read-only, so plugin
+# code changes only here. Each project's managed settings (mounted read-only at
+# /etc/claude-code/managed-settings.json) pick which plugins are on and their env options.
+
+settings_file() { printf '%s/projects/%s.managed-settings.json' "$HUB" "$1"; }
+
+ensure_settings() { # default: the image's managed settings (harness on) + empty env
+  local f; f="$(settings_file "$1")"
+  [ -f "$f" ] || jq '. + {env: {}}' "$REPO_DIR/image/managed-settings.json" > "$f"
+}
+
+write_settings() { # write_settings <name> <jq args...> (input on stdin, so the args may end with --args)
+  local f tmp; f="$(settings_file "$1")"; ensure_settings "$1"; shift
+  tmp="$(jq "$@" < "$f")"
+  # In place, not mv: a single-file bind mount keeps the old inode, so a replaced file would not reach the container.
+  printf '%s\n' "$tmp" > "$f"
+}
+
+market_dir() { # host folder of a marketplace usable by the project
+  if [ "$2" = "$HARNESS_MARKET" ]; then project_var "$1" HARNESS_DIR; else printf '%s/%s' "$PLUGINS_DIR" "$2"; fi
+}
+
+cmd_plugin() {
+  case "${1:-ls}" in
+    source) shift; plugin_source "$@" ;;
+    ls) local f; for f in "$HUB"/projects/*.env; do [ -f "$f" ] || continue; plugin_ls "$(basename "$f" .env)"; done ;;
+    *)
+      local name="$1" sub="${2:-ls}"
+      require_project "$name"; shift 2 || shift
+      case "$sub" in
+        add) plugin_add "$name" "$@" ;;
+        rm) plugin_rm "$name" "$@" ;;
+        ls) plugin_ls "$name" ;;
+        *) die "usage: proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE ...] | rm <plugin@marketplace> | ls" ;;
+      esac ;;
+  esac
+}
+
+plugin_source() { # proj plugin source add <owner/repo|URL> | update [marketplace] | ls
+  local d tmp m
+  mkdir -p "$PLUGINS_DIR"
+  case "${1:-ls}" in
+    add)
+      [ -n "${2:-}" ] || die "usage: proj plugin source add <owner/repo|URL>"
+      tmp="$(mktemp -d "$PLUGINS_DIR/.add.XXXXXX")"
+      case "$2" in
+        *://*|git@*) git clone -q "$2" "$tmp/r" ;;
+        */*) gh repo clone "$2" "$tmp/r" -- -q ;;
+        *) false ;;
+      esac || { rm -rf "$tmp"; die "could not clone $2 (owner/repo or URL)"; }
+      m="$(jq -r '.name // empty' "$tmp/r/.claude-plugin/marketplace.json" 2>/dev/null || true)"
+      valid_name "$m" || { rm -rf "$tmp"; die "$2 has no .claude-plugin/marketplace.json with a valid name"; }
+      [ "$m" != "$HARNESS_MARKET" ] && [ ! -e "$PLUGINS_DIR/$m" ] || { rm -rf "$tmp"; die "marketplace $m already exists (proj plugin source update $m)"; }
+      mv "$tmp/r" "$PLUGINS_DIR/$m"; rmdir "$tmp"
+      echo "added marketplace $m: $(jq -r '[.plugins[].name] | join(", ")' "$PLUGINS_DIR/$m/.claude-plugin/marketplace.json")"
+      echo "turn one on: proj plugin <project> add <plugin>@$m" ;;
+    update)
+      for d in "$PLUGINS_DIR"/*/; do
+        d="${d%/}"; [ -d "$d" ] || continue
+        [ -z "${2:-}" ] || [ "$(basename "$d")" = "$2" ] || continue
+        echo "== $(basename "$d")"; git -C "$d" pull -q --ff-only && git -C "$d" log -1 --format='%h %s'
+      done ;;
+    ls)
+      for d in "$PLUGINS_DIR"/*/; do
+        d="${d%/}"; [ -d "$d" ] || continue
+        printf '%-24s %s %s  plugins: %s\n' "$(basename "$d")" "$(git -C "$d" log -1 --format=%h)" \
+          "$(git -C "$d" remote get-url origin)" "$(jq -r '[.plugins[].name] | join(", ")' "$d/.claude-plugin/marketplace.json")"
+      done ;;
+    *) die "usage: proj plugin source add <owner/repo|URL> | update [marketplace] | ls" ;;
+  esac
+}
+
+plugin_add() { # plugin_add <name> <plugin@marketplace> [--env KEY=VALUE ...] (KEY= removes KEY)
+  local name="$1" p="${2:-}" m dir envs=()
+  case "$p" in ?*@?*) ;; *) die "usage: proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE ...]" ;; esac
+  shift 2
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --env) [[ "${2:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || die "--env takes KEY=VALUE"; envs+=("$2"); shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  m="${p#*@}"; dir="$(market_dir "$name" "$m")"
+  jq -e --arg n "${p%@*}" 'any(.plugins[]; .name == $n)' "$dir/.claude-plugin/marketplace.json" >/dev/null 2>&1 \
+    || die "no plugin ${p%@*} in marketplace $m (proj plugin source ls)"
+  write_settings "$name" --arg p "$p" --arg m "$m" --arg h "$HARNESS_MARKET" '
+    .enabledPlugins[$p] = true
+    | if $m == $h then . else .extraKnownMarketplaces[$m] = {source: {source: "directory", path: ("/opt/plugins/" + $m)}} end
+    | .env = ((.env // {}) + ($ARGS.positional | map(capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}) | add // {})
+             | with_entries(select(.value != "")))' --args ${envs[@]+"${envs[@]}"}
+  echo "$name: $p on from the next task"
+}
+
+plugin_rm() { # plugin_rm <name> <plugin@marketplace>: drops the marketplace too when no other plugin of it is on
+  local name="$1" p="${2:-}"
+  case "$p" in ?*@?*) ;; *) die "usage: proj plugin <name> rm <plugin@marketplace>" ;; esac
+  jq -e --arg p "$p" '.enabledPlugins | has($p)' "$(settings_file "$name")" >/dev/null 2>&1 || die "$p is not on in $name"
+  write_settings "$name" --arg p "$p" --arg m "${p#*@}" --arg h "$HARNESS_MARKET" '
+    del(.enabledPlugins[$p])
+    | if $m == $h or any(.enabledPlugins | keys[]; endswith("@" + $m)) then . else del(.extraKnownMarketplaces[$m]) end'
+  echo "$name: $p off from the next task (env options stay; clear one with add … --env KEY=)"
+}
+
+plugin_ls() {
+  ensure_settings "$1"
+  jq -r --arg n "$1" '"\($n): \(.enabledPlugins | to_entries | map(select(.value) | .key) | join(", "))"
+    + (if (.env // {}) == {} then "" else "  env: \(.env | to_entries | map("\(.key)=\(.value)") | join(" "))" end)' \
+    "$(settings_file "$1")"
 }
 
 # --- hub (main agent on the host) --------------------------------------------
@@ -879,6 +995,9 @@ proj — per-project agent containers (docs/proj.md)
   proj idle [hours] | install [hours] | uninstall   stop idle containers (default 3h)
   proj hub init|login|run|install|uninstall|status   main agent on the host (Remote Control)
   proj imagegen install|uninstall|status|run         image MCP for containers (host Codex login)
+  proj plugin source add <owner/repo|URL> | update [marketplace] | ls   plugin marketplaces on the host
+  proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE ...] | rm <plugin@marketplace> | ls
+  proj plugin ls                              plugins on in every project
   proj alias <name> <별칭>                  set the alias the hub matches (e.g. 스모크)
   proj ls | up <name> | down <name> | shell <name>
   proj rm <name> [--purge] [--yes]         also deletes what the agent started in Docker; --purge: folder, task records
@@ -914,7 +1033,7 @@ cmd_imagegen() { # proj imagegen run [codex] | install | uninstall | status
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
-    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|diff|close|hub|imagegen) "cmd_$cmd" "$@" ;;
+    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|diff|close|hub|imagegen|plugin) "cmd_$cmd" "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 1 ;;
   esac
