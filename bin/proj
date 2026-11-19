@@ -122,7 +122,11 @@ account_use() { # proj account use <project> <alias>: the token is a container s
   [ -z "$(running_tasks "$name")" ] || die "$name has running tasks; switch after they finish"
   set_var "$name" ACCOUNT "$alias"
   set_var "$name" ACCOUNT_DIR "$(account_dir "$alias")"
-  dc "$name" up -d >/dev/null 2>&1
+  # The token is a secret file; compose does not see a changed path as a change, so force it.
+  dc "$name" up -d --force-recreate >/dev/null 2>&1 || die "could not recreate $name's containers (proj up $name)"
+  [ "$(docker exec "$(container "$name")" sha256sum /run/secrets/claude_token | cut -d' ' -f1)" = \
+    "$(shasum -a 256 "$(account_dir "$alias")/claude.token" | cut -d' ' -f1)" ] \
+    || die "$name's container does not have $alias's token after recreating; check proj up $name"
   echo "$name now uses account $alias ($(usage_line "$alias"))"
 }
 
@@ -616,7 +620,8 @@ usage_ok() { # dies when the account is at or over USAGE_MAX in any window; refr
   [ -n "$src" ] && [ $(( $(date +%s) - ${src%% *} )) -lt "$USAGE_STALE" ] || usage_probe "$1"
   while read -r w u r st; do
     [ -n "$w" ] || continue
-    if [ "$st" != allowed ] || awk -v u="$u" -v m="$USAGE_MAX" 'BEGIN{exit !(u >= m)}'; then
+    # allowed_warning (sent from ~75%) still works; only rejected or USAGE_MAX stops new tasks.
+    if [ "$st" = rejected ] || awk -v u="$u" -v m="$USAGE_MAX" 'BEGIN{exit !(u >= m)}'; then
       die "account $1 is at $(awk -v u="$u" 'BEGIN{printf "%d", u*100}')% of its $w limit until $(date -r "$r" '+%m/%d %H:%M'). Switch: proj account use <project> <alias>, or wait"
     fi
   done <<EOF

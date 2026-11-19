@@ -85,6 +85,11 @@ check "5h usage shown as percent" yes "$(usage_line acct | grep -q '5h 97%' && e
 check "expired 7d window counts as 0" yes "$(usage_line acct | grep -q '7d 0%' && echo yes || echo no)"
 check "over USAGE_MAX blocks" blocked "$( (USAGE_MAX=0.95; usage_ok acct) >/dev/null 2>&1 && echo ok || echo blocked)"
 check "under a higher USAGE_MAX passes" ok "$( (USAGE_MAX=0.99; usage_ok acct) >/dev/null 2>&1 && echo ok || echo blocked)"
+w="$AGENT_HUB_HOME/tasks/demo/w1"; mkdir -p "$w"; printf 'PROJECT=demo\nACCOUNT=warn\n' > "$w/meta"
+printf '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"seven_day":{"utilization":0.79,"resetsAt":%s,"status":"allowed_warning"}}}}\n' "$future" > "$w/log.jsonl"
+check "allowed_warning under USAGE_MAX passes" ok "$( (USAGE_MAX=0.95; usage_ok warn) >/dev/null 2>&1 && echo ok || echo blocked)"
+sed -i '' 's/allowed_warning/rejected/' "$w/log.jsonl"
+check "rejected blocks under USAGE_MAX" blocked "$( (USAGE_MAX=0.95; usage_ok warn) >/dev/null 2>&1 && echo ok || echo blocked)"
 check "account without tasks has no data" "usage: no data yet" "$(usage_line nobody)"
 mkdir -p "$AGENT_HUB_HOME/usage"; sleep 1
 printf '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.02,"resetsAt":%s,"status":"allowed"}}}}\n' "$future" > "$AGENT_HUB_HOME/usage/acct.jsonl"
