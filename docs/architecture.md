@@ -59,7 +59,7 @@ Mac mini
 |---|---|---|
 | 2026-11-18 | 컨테이너 런타임은 OrbStack | 사용자가 Docker Desktop에서 전환 |
 | 2026-11-18 | 프로젝트 폴더는 호스트 `~/workspace/<name>`을 같은 경로로 바인드 마운트 | 호스트에서 VS Code·통합 에이전트가 바로 보고, worktree 절대경로가 양쪽에서 유효 |
-| 2026-11-18 | 작업마다 worktree `.worktrees/<id>`, 브랜치 `agent/<id>`. 커밋까지, push·PR은 지시할 때만 | 병렬 작업 분리, 리뷰는 VS Code에서 |
+| 2026-11-18 | 작업마다 worktree `.worktrees/<id>`, 브랜치 `agent/<id>`. 커밋까지, push·PR은 지시할 때만 | 병렬 작업 분리, 리뷰는 VS Code에서. 2026-11-19에 체크아웃 기본으로 바뀜 |
 | 2026-11-18 | 동시 실행 작업 2개 (`MAX_TASKS`), 컨테이너 메모리 상한 6g | RAM 16GB |
 | 2026-11-18 | 계정 여러 개: 프로젝트마다 계정 별칭 하나 | 개인(sosin)·회사(fins) 크레딧 모두 사용 가능 (사용자 결정) |
 | 2026-11-18 | GitHub: 메인 에이전트는 호스트 `gh`(저장소 생성 포함), 프로젝트 컨테이너는 계정당 fine-grained 토큰(All repositories, Administration 없음) | 저장소마다 토큰을 새로 만들 필요 없이 새 저장소도 바로 작업 가능 |
@@ -75,6 +75,7 @@ Mac mini
 | 2026-11-19 | 포트 게시(`-p`) 허용, `--network host`·이미지 삭제·prune 금지 | 프론트엔드 디버깅용 localhost. OrbStack의 host 네트워크는 맥과 같지 않음. 이미지 캐시는 공유 (사용자 결정) |
 | 2026-11-19 | `proj rm`은 라벨 붙은 컨테이너·네트워크·볼륨까지 삭제, `proj down`은 그 컨테이너를 멈춤. `proj idle`은 그 컨테이너를 활동으로 보지 않고 에이전트와 함께 멈춤 | 프로젝트는 compose·시드로 다시 띄울 수 있게 구성 (사용자 결정). 잊힌 DB가 메모리를 계속 쓰지 않게 |
 | 2026-11-18 | imagegen: 호스트 MCP 서버가 호스트 Codex의 ChatGPT(Plus) 로그인으로 생성, Codex는 셸 없이 읽기 전용, 결과는 URL로 내려받기 | 사용자가 API 키 대신 구독 OAuth를 원함. 별도 컨테이너·로그인 없이 호스트 하나만 인증 보유 |
+| 2026-11-19 | 작업은 체크아웃에서 기본 브랜치로부터 `agent/<id>`를 만들어 커밋. 커밋 안 된 변경이 있거나 같은 폴더에 실행 중인 작업이 있으면 거부. 워크스페이스 `--repo`도 같은 규칙. worktree는 `proj task --worktree`로 명시할 때만, 서브에이전트 병렬은 Claude Code worktree 격리(`isolation: worktree`) (#1) | 프로젝트당 에이전트 하나(1:1). VS Code에서 폴더 하나로 리뷰, worktree가 쌓이지 않음 (사용자 결정) |
 
 ## 단계
 

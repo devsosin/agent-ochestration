@@ -608,7 +608,7 @@ session_id() {
   jq -r 'select(.type == "system" and .subtype == "init") | .session_id' "$1/log.jsonl" 2>/dev/null | tail -1
 }
 
-can_launch() { # checks that must pass before a task leaves any trace (worktree, record)
+can_launch() { # checks that must pass before a task leaves any trace (branch, worktree, record)
   [ "$(running_tasks | wc -l | tr -d ' ')" -lt "$MAX_TASKS" ] || die "MAX_TASKS=$MAX_TASKS tasks already running (proj status)"
   usage_ok "$(project_var "$1" ACCOUNT)"
 }
@@ -620,7 +620,8 @@ launch() { # launch <task dir> [session id to resume]
   model="$(project_var "$project" MODEL || true)"
   sys="You run inside an agent-hub project container. Task $id, working directory $workdir"
   if [ -n "$(meta "$d" BRANCH)" ]; then
-    sys="$sys on branch $(meta "$d" BRANCH). Commit your changes on this branch with clear messages."
+    sys="$sys on branch $(meta "$d" BRANCH) (from $(meta "$d" BASE)). Commit your changes on this branch with clear messages; do not switch branches."
+    sys="$sys If you split work across parallel subagents that edit files, give each one its own worktree (Agent tool isolation: \"worktree\") and merge their results into this branch."
   else
     sys="$sys on the checked-out branch. Do not commit unless the task asks."
   fi
@@ -649,18 +650,59 @@ new_task_id() { # yymmdd-HHMMSS, plus -2, -3… when that second is taken in any
   echo "$id"
 }
 
+default_branch() { # origin's default branch, else main/master, else the current branch
+  local b
+  b="$(git -C "$1" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null || true)"
+  if [ -n "$b" ] && git -C "$1" rev-parse -q --verify "refs/heads/${b#origin/}" >/dev/null; then echo "${b#origin/}"; return; fi
+  for b in main master; do
+    if git -C "$1" rev-parse -q --verify "refs/heads/$b" >/dev/null; then echo "$b"; return; fi
+  done
+  git -C "$1" rev-parse --abbrev-ref HEAD
+}
+
+task_workdir() { # task_workdir <dir> <id> <worktree 0|1>: checks, then sets WORKDIR BRANCH BASE (git changes only after all checks)
+  local dir="$1" id="$2" wt="$3" t tw
+  WORKDIR="$dir"; BRANCH=""; BASE=""
+  if [ "$wt" = 0 ]; then
+    # One agent per checkout: refuse when a running task works in this folder, inside it, or above it.
+    for t in $(running_tasks); do
+      tw="$(meta "$t" WORKDIR)"
+      case "$tw" in */.worktrees/*) continue ;; esac   # --worktree tasks have their own folder
+      case "$dir/" in "$tw/"*) die "task $(basename "$t") is already working in $(tilde "$tw"); wait for it, or use --worktree for parallel work" ;; esac
+      case "$tw/" in "$dir/"*) die "task $(basename "$t") is already working in $(tilde "$tw"); wait for it, or use --worktree for parallel work" ;; esac
+    done
+  fi
+  is_repo "$dir" && git -C "$dir" rev-parse -q --verify HEAD >/dev/null 2>&1 || {
+    [ "$wt" = 0 ] || die "--worktree needs a git repository with a commit"
+    return 0   # workspace root or empty repo: in place, no branch
+  }
+  BASE="$(default_branch "$dir")"; BRANCH="agent/$id"
+  for t in /.worktrees/ /.claude/worktrees/; do   # task and subagent worktrees stay out of git status
+    grep -qxF "$t" "$dir/.git/info/exclude" 2>/dev/null || echo "$t" >> "$dir/.git/info/exclude"
+  done
+  if [ "$wt" = 1 ]; then
+    WORKDIR="$dir/.worktrees/$id"
+    git -C "$dir" worktree add -q -b "$BRANCH" "$WORKDIR" "$BASE"
+  else
+    [ -z "$(git -C "$dir" status --porcelain)" ] \
+      || die "$(tilde "$dir") has uncommitted changes ($(git -C "$dir" rev-parse --abbrev-ref HEAD)); commit or discard them first, or use --worktree"
+    git -C "$dir" switch -q -c "$BRANCH" "$BASE"
+  fi
+}
+
 cmd_task() {
-  local name="${1:-}" here=0 sub="" id dir d t workdir branch="" base="" prompt
+  local name="${1:-}" wt=0 sub="" id dir d prompt WORKDIR BRANCH BASE
   require_project "$name"; shift
   while :; do
     case "${1:-}" in
-      --here) here=1; shift ;;
+      --worktree) wt=1; shift ;;
+      --here) shift ;;   # old flag: running in the checkout is now the default
       --repo) sub="${2:-}"; shift 2 ;;
       *) break ;;
     esac
   done
   if [ "${1:-}" = - ]; then prompt="$(cat)"; else prompt="$*"; fi
-  [ -n "$prompt" ] || die "usage: proj task <name> [--repo <folder>] [--here] <prompt...|->"
+  [ -n "$prompt" ] || die "usage: proj task <name> [--repo <folder>] [--worktree] <prompt...|->"
   dir="$(project_var "$name" PROJECT_DIR)"
   if [ -n "$sub" ]; then
     dir="$dir/$sub"
@@ -669,31 +711,18 @@ cmd_task() {
   can_launch "$name"
   id="$(new_task_id)"
   d="$HUB/tasks/$name/$id"
-
-  workdir="$dir"
-  if [ "$here" = 0 ] && is_repo "$dir" && git -C "$dir" rev-parse -q --verify HEAD >/dev/null 2>&1; then
-    base="$(git -C "$dir" rev-parse --abbrev-ref HEAD)"
-    branch="agent/$id"
-    workdir="$dir/.worktrees/$id"
-    grep -qxF '/.worktrees/' "$dir/.git/info/exclude" 2>/dev/null || echo '/.worktrees/' >> "$dir/.git/info/exclude"
-    git -C "$dir" worktree add -q -b "$branch" "$workdir" "$base"
-  else
-    # Without a worktree the task edits the folder in place; two such tasks would collide.
-    for t in $(running_tasks "$name"); do
-      [ "$(meta "$t" WORKDIR)" != "$workdir" ] || die "task $(basename "$t") is already working in $workdir; wait for it, or use --repo for a worktree"
-    done
-  fi
+  task_workdir "$dir" "$id" "$wt"
 
   mkdir -p "$d"
   printf '%s\n' "$prompt" > "$d/prompt.txt"
   printf '## %s\n%s\n\n' "$(date '+%F %T')" "$prompt" > "$d/prompts.log"
   printf 'PROJECT=%s\nWORKDIR=%s\nBRANCH=%s\nBASE=%s\nCREATED=%s\n' \
-    "$name" "$workdir" "$branch" "$base" "$(date '+%F %T')" > "$d/meta"
+    "$name" "$WORKDIR" "$BRANCH" "$BASE" "$(date '+%F %T')" > "$d/meta"
   launch "$d"
 }
 
 cmd_reply() {
-  local id="${1:-}" d sid prompt
+  local id="${1:-}" d sid prompt w b t
   [ -n "$id" ] || die "usage: proj reply <task> <prompt...|->"
   d="$(task_dir "$id")"; shift
   [ "$(task_state "$d")" != running ] || die "$id is still running"
@@ -701,6 +730,15 @@ cmd_reply() {
   [ -n "$prompt" ] || die "empty prompt"
   sid="$(session_id "$d")"
   [ -n "$sid" ] || die "$id has no session to resume (see $d/stderr.log)"
+  w="$(meta "$d" WORKDIR)"; b="$(meta "$d" BRANCH)"
+  if [ -n "$b" ] && [ -d "$w" ] && [ "$(git -C "$w" rev-parse --abbrev-ref HEAD)" != "$b" ]; then
+    # Checkout task whose checkout moved on (proj close or a later task): resume on its own branch.
+    for t in $(running_tasks); do
+      [ "$(meta "$t" WORKDIR)" != "$w" ] || die "task $(basename "$t") is working in $(tilde "$w"); wait for it"
+    done
+    [ -z "$(git -C "$w" status --porcelain)" ] || die "$(tilde "$w") has uncommitted changes; commit or discard them first"
+    git -C "$w" switch -q "$b"
+  fi
   printf '%s\n' "$prompt" > "$d/prompt.txt"
   printf '## %s\n%s\n\n' "$(date '+%F %T')" "$prompt" >> "$d/prompts.log"
   launch "$d" "$sid"
@@ -773,7 +811,7 @@ cmd_wait() {
 }
 
 cmd_diff() {
-  local d w base r
+  local d w base r b
   [ -n "${1:-}" ] || die "usage: proj diff <task>"
   d="$(task_dir "$1")"; w="$(meta "$d" WORKDIR)"; base="$(meta "$d" BASE)"
   if ! is_repo "$w"; then
@@ -786,10 +824,11 @@ cmd_diff() {
     echo; echo "open: code $(tilde "$w")"; echo "      vscode://vscode-remote/ssh-remote+macmini$w"
     return
   fi
-  echo "== uncommitted"; git -C "$w" status --short
+  b="$(meta "$d" BRANCH)"; b="${b:-HEAD}"
+  echo "== uncommitted (on $(git -C "$w" rev-parse --abbrev-ref HEAD))"; git -C "$w" status --short
   if [ -n "$base" ]; then
-    echo "== commits since $base"; git -C "$w" log --oneline "$base..HEAD"
-    echo "== diffstat $base...HEAD"; git -C "$w" diff --stat "$base...HEAD"
+    echo "== commits since $base"; git -C "$w" log --oneline "$base..$b"
+    echo "== diffstat $base...$b"; git -C "$w" diff --stat "$base...$b"
   fi
   echo
   echo "open: code $(tilde "$w")"
@@ -797,17 +836,31 @@ cmd_diff() {
 }
 
 cmd_close() {
-  local d w
+  local d w b
   [ -n "${1:-}" ] || die "usage: proj close <task>"
   d="$(task_dir "$1")"
   [ "$(task_state "$d")" != running ] || die "$1 is still running"
   w="$(meta "$d" WORKDIR)"
-  if [ -n "$(meta "$d" BRANCH)" ] && [ -d "$w" ]; then
-    # Refuses on uncommitted changes, so nothing is lost; the branch stays.
-    git -C "$(dirname "$(dirname "$w")")" worktree remove "$w" \
-      || die "worktree has uncommitted changes; commit or discard them first"
-    echo "removed worktree $(tilde "$w") (branch $(meta "$d" BRANCH) kept)"
-  fi
+  b="$(meta "$d" BRANCH)"
+  case "$w" in
+    */.worktrees/*)
+      if [ -n "$b" ] && [ -d "$w" ]; then
+        # Refuses on uncommitted changes, so nothing is lost; the branch stays.
+        git -C "$(dirname "$(dirname "$w")")" worktree remove "$w" \
+          || die "worktree has uncommitted changes; commit or discard them first"
+        echo "removed worktree $(tilde "$w") (branch $b kept)"
+      fi ;;
+    *)
+      # Checkout task: deletes nothing; leaves the checkout alone unless it is clean and still on the task branch.
+      if [ -n "$b" ] && [ "$(git -C "$w" rev-parse --abbrev-ref HEAD 2>/dev/null)" = "$b" ]; then
+        if [ -z "$(git -C "$w" status --porcelain)" ]; then
+          git -C "$w" switch -q "$(meta "$d" BASE)"
+          echo "$(tilde "$w") back on $(meta "$d" BASE) (branch $b kept)"
+        else
+          echo "$(tilde "$w") has uncommitted changes; staying on $b"
+        fi
+      fi ;;
+  esac
   touch "$d/closed"
 }
 
@@ -829,7 +882,7 @@ proj — per-project agent containers (docs/proj.md)
   proj alias <name> <별칭>                  set the alias the hub matches (e.g. 스모크)
   proj ls | up <name> | down <name> | shell <name>
   proj rm <name> [--purge] [--yes]         also deletes what the agent started in Docker; --purge: folder, task records
-  proj task <name> [--repo <folder>] [--here] <prompt...|->  run claude in a new worktree (agent/<id>)
+  proj task <name> [--repo <folder>] [--worktree] <prompt...|->  run claude on a new branch agent/<id> in the checkout (--worktree: in .worktrees/<id>, for parallel work)
   proj reply <task> <prompt...|->          continue the task's session
   proj status [task|name] | wait <task> [secs] | logs <task> [-f] | diff <task> | close <task>
 EOF

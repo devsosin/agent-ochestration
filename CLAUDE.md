@@ -39,7 +39,7 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/hub-settings.json` | `hub/settings.json` with paths rewritten for `WORKSPACE_ROOT`/`AGENT_HUB_HOME` (`proj hub run`) |
 | `~/.agent-hub/hub/` | hub working dir (`CLAUDE.md` symlink, `hub.log`); launchd: `~/Library/LaunchAgents/com.agent-hub.hub.plist` |
 | `~/.claude-<alias>/` | host Claude config per account (full login, used by the hub) |
-| `~/workspace/<name>/` (`WORKSPACE_ROOT`) | project checkout; task worktrees in `.worktrees/<id>/` |
+| `~/workspace/<name>/` (`WORKSPACE_ROOT`) | project checkout (tasks run here on `agent/<id>`); `--worktree` tasks in `.worktrees/<id>/` |
 | `~/workspace/harness/` (`HARNESS_DIR`) | harness plugin source (`devsosin/harness`), mounted read-only |
 
 ## 2. Sources of truth

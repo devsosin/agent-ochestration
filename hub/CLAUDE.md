@@ -20,7 +20,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Follow up on a task | `proj reply <task> - <<'EOF'` … `EOF` |
 | Wait for the result | `proj wait <task>` (blocks until it ends, up to 30 min) |
 | Progress / review | `proj status <task>`, `proj logs <task>`, `proj diff <task>` |
-| Finish a task | `proj close <task>` (keeps the branch) |
+| Finish a task | `proj close <task>` (keeps the branch; a clean checkout goes back to the default branch) |
 | Subscription usage per account (5h / 7d) | `proj usage` |
 | Model for a project's tasks | `proj model <name> <model>` / `proj model <name> -` (default) |
 | Image generation for a project | Nothing to set up: project agents have the `imagegen` MCP tool (`generate_image`). Mention it in the prompt ("generate the image with the imagegen MCP tool and save it to …"). Check `proj imagegen status` if it fails |
@@ -33,7 +33,8 @@ Read-only git and gh for context: `git -C <dir> log|diff|status|show`, `gh repo 
 The user gives plain instructions ("스모크에 로그인 API 추가해", "블로그 빌드 깨진 거 고쳐"), not "make the agent do X". Treat every request about code as work to delegate:
 
 1. Resolve the project from the name or alias in `proj ls` (Korean aliases, partial names, the project discussed last). If nothing matches or two could, ask which one — one short question. If the user names a repo that is not registered ("예전 blog 레포 다시 작업하자"), find it with `gh repo list` and register it with `proj new --repo`.
-   - Workspace (`ws`): work inside one repo → `--repo <folder>` (own worktree, runs in parallel). Work across repos or on root docs → no `--repo`; it runs at the workspace root, one such task at a time.
+   - Tasks run in the project checkout on a new branch `agent/<id>`, one task per checkout at a time. `proj task` refuses while another task works there or the checkout has uncommitted changes: tell the user and wait, or offer `--worktree` only when they want parallel work in the same project.
+   - Workspace (`ws`): work inside one repo → `--repo <folder>` (runs in that repo's checkout). Work across repos or on root docs → no `--repo`; it runs at the workspace root.
 2. A follow-up to a task in this conversation ("거기에 테스트도 추가해") is `proj reply <task>`, not a new task.
 3. Write a self-contained English prompt — the project agent has no memory of this chat: goal and why, constraints, acceptance criteria, how to verify, which harness skill fits (`harness:implement`, `harness:github-issue`, `harness:github-pr`, `harness:frontend`). Ask for a PR only if the user did.
 4. Then `proj wait <task>` and report the result, unless the user says not to wait. Several independent requests: start them all (at most `MAX_TASKS` = 2 at once; `proj task` refuses beyond that), then wait for each. Never use sleep loops or `proj logs -f`.
@@ -48,7 +49,7 @@ The user gives plain instructions ("스모크에 로그인 API 추가해", "블�
 ## How to report
 
 - State: done / failed / needs input, a one-line summary from `proj wait`/`proj status`, then `proj diff` highlights (files, commits).
-- Point to the worktree path for VS Code review, written with `~` for the home directory as `proj` prints it (never the full `/Volumes/...` or `/Users/...` form). Never paste whole diffs into chat.
+- Point to the project folder and branch for VS Code review (the worktree path only for `--worktree` tasks), written with `~` for the home directory as `proj` prints it (never the full `/Volumes/...` or `/Users/...` form). Never paste whole diffs into chat.
 - On `failed`: show the error line. `Not logged in` means the account token expired — tell the user to run `proj account add <alias>`; you cannot.
 
 ## Destructive actions need a yes in chat first
