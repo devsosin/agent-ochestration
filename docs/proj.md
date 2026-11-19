@@ -22,31 +22,33 @@
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지) / 컨테이너 셸 |
 | `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
-| `proj task <name> [--repo <folder>] [--here] <지시…\|->` | 새 worktree에서 `claude -p` 백그라운드 실행. 워크스페이스는 `--repo`로 저장소를 고르고, 없으면 루트에서 실행. `-`는 표준입력에서 지시를 읽음 |
-| `proj reply <task> <지시…\|->` | 같은 세션을 이어서 실행 (`--resume`) |
+| `proj task <name> [--repo <folder>] [--worktree] <지시…\|->` | 체크아웃에 기본 브랜치에서 새 브랜치 `agent/<id>`를 만들고 `claude -p` 백그라운드 실행. `--worktree`는 `.worktrees/<id>`에서 실행(병렬용). 워크스페이스는 `--repo`로 저장소를 고르고, 없으면 루트에서 실행. `-`는 표준입력에서 지시를 읽음. `--here`는 예전 옵션(무시) |
+| `proj reply <task> <지시…\|->` | 같은 세션을 이어서 실행 (`--resume`). 체크아웃이 다른 브랜치로 옮겨 갔으면 변경이 없을 때 작업 브랜치로 다시 전환 |
 | `proj status [task\|name]` | 작업 목록(삭제된 프로젝트 제외) 또는 한 작업의 상태·비용·결과 보고 |
 | `proj wait <task> [초]` | 작업이 끝날 때까지 기다렸다가 `status` 출력 (기본 1800초, 넘으면 종료 코드 3). 메인 에이전트는 이것으로 기다림 |
 | `proj logs <task> [-f]` | Claude의 메시지와 도구 호출 요약 (`-f` 실시간, 작업이 끝나면 멈춤) |
-| `proj diff <task>` | 커밋 안 된 변경, base 이후 커밋, diffstat, VS Code로 여는 경로 |
-| `proj close <task>` | worktree 삭제(브랜치 유지). 커밋 안 된 변경이 있으면 거부 |
+| `proj diff <task>` | 커밋 안 된 변경, base 이후 작업 브랜치 커밋, diffstat, VS Code로 여는 경로 |
+| `proj close <task>` | 체크아웃 작업: 아무것도 지우지 않음. 작업 브랜치에 있고 변경이 없으면 기본 브랜치로 돌아감. worktree 작업: worktree 삭제(브랜치 유지), 커밋 안 된 변경이 있으면 거부 |
 
 ## 프로젝트 종류
 
 | 종류 | 만들기 | 작업 위치 | 동시 실행 |
 |---|---|---|---|
-| `repo` 저장소 하나 | `proj new <name> --repo …` / `--create` | `<repo>/.worktrees/<id>` (브랜치 `agent/<id>`) | 가능 |
-| `ws` 워크스페이스 | `proj new <name> --workspace` + `proj add …` | `--repo <folder>`: `<ws>/<folder>/.worktrees/<id>` (루트·저장소 CLAUDE.md 모두 읽힘) | 가능 |
+| `repo` 저장소 하나 | `proj new <name> --repo …` / `--create` | 체크아웃 `<repo>` (브랜치 `agent/<id>`) | 하나씩. `--worktree`면 가능 |
+| `ws` 워크스페이스 | `proj new <name> --workspace` + `proj add …` | `--repo <folder>`: `<ws>/<folder>` (루트·저장소 CLAUDE.md 모두 읽힘) | 저장소마다 하나씩. `--worktree`면 가능 |
 | | | `--repo` 없이: 워크스페이스 루트 (여러 저장소·루트 문서) | 같은 폴더에서 하나씩 |
 
-`--here`나 워크스페이스 루트처럼 worktree 없이 폴더를 직접 고치는 작업은, 같은 폴더에서 이미 실행 중인 작업이 있으면 거부합니다. `proj rm --purge`는 워크스페이스의 각 저장소를 검사하고, 저장소 밖 루트 파일(CLAUDE.md, docs 등)이 있으면 거부합니다.
+프로젝트 하나에 에이전트 하나라서, worktree 없이 폴더를 직접 고치는 작업은 같은 폴더(또는 그 상위·하위 폴더)에서 실행 중인 작업이 있거나 체크아웃에 커밋 안 된 변경이 있으면 거부합니다. 병렬이 꼭 필요하면 `--worktree`. `proj rm --purge`는 워크스페이스의 각 저장소를 검사하고, 저장소 밖 루트 파일(CLAUDE.md, docs 등)이 있으면 거부합니다.
 
 ## 작업 흐름
 
 1. `proj task app "로그인 API에 rate limit 추가"` → 작업 ID(예: `261118-130303`)
-   - 커밋이 있는 저장소: `.worktrees/<id>`에 브랜치 `agent/<id>`를 만들고 거기서 실행. 커밋까지 하고 push·PR은 지시할 때만.
-   - `--here` 또는 커밋이 없는 저장소: 프로젝트 폴더에서 바로 실행하고 커밋하지 않음.
+   - 커밋이 있는 저장소: 체크아웃에서 기본 브랜치(`origin/HEAD`, 없으면 `main`/`master`)로부터 `agent/<id>`를 만들어 전환하고 실행. 커밋까지 하고 push·PR은 지시할 때만. 이전 작업 브랜치에 남아 있어도 새 작업은 기본 브랜치에서 시작.
+   - 에이전트가 서브에이전트로 병렬 작업을 나누면 서브에이전트마다 worktree 격리(`isolation: worktree`, `.claude/worktrees/`)를 쓰도록 시스템 프롬프트로 안내.
+   - `--worktree`: `.worktrees/<id>`에 같은 브랜치를 만들고 거기서 실행(같은 프로젝트 병렬 작업용).
+   - 커밋이 없는 저장소·워크스페이스 루트: 폴더에서 바로 실행하고 브랜치를 만들지 않음.
 2. `proj status` / `proj logs <id> -f`로 진행 확인.
-3. `proj diff <id>` → VS Code로 worktree를 열어 diff 확인.
+3. `proj diff <id>` → VS Code로 프로젝트 폴더(`--worktree`면 worktree)를 열어 diff 확인.
 4. 고칠 점은 `proj reply <id> "…"`. 끝나면 PR은 `proj reply <id> "harness github-pr로 PR 올려줘"`, 정리는 `proj close <id>`.
 
 ## 메인 에이전트 (hub)
