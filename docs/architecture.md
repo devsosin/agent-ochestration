@@ -19,7 +19,8 @@ Mac mini
 |---|---|---|
 | `bin/proj` | 호스트 | 프로젝트·계정·작업 관리 CLI ([proj.md](proj.md)) |
 | `agent-hub:base` / `agent-hub:rust` | 이미지 | Claude Code, gh, git, Node (+ Rust) |
-| `compose/project.yml` | 프로젝트당 compose 프로젝트 `proj-<name>` | 마운트·시크릿·메모리 상한 |
+| `compose/project.yml` | 프로젝트당 compose 프로젝트 `proj-<name>` | 마운트·시크릿·메모리 상한. 서비스 `agent`(에이전트), `docker`(Docker 프록시) |
+| `agent-hub:dockerproxy` | 이미지 (`dockerproxy/`) | 호스트 Docker 소켓을 갖고 그 프로젝트 것만 통과시키는 API 프록시 (아래 보안 경계) |
 | harness | `~/workspace/harness` → `/opt/harness:ro` | managed settings로 마켓플레이스 등록·활성화. 호스트에서 고치면 다음 세션부터 반영 |
 | 계정 | `~/.agent-hub/accounts/<alias>/` | [accounts.md](accounts.md) |
 
@@ -27,11 +28,30 @@ Mac mini
 
 | 대상 | 프로젝트 컨테이너 | 이유 |
 |---|---|---|
-| Docker 소켓 | 넣지 않음 | 소켓을 가진 쪽은 `/Users` 아래 무엇이든 마운트할 수 있음 |
+| Docker 소켓 | 넣지 않음. `DOCKER_HOST=tcp://docker:2375`(프로젝트별 프록시)만 | 소켓을 가진 쪽은 `/Users` 아래 무엇이든 마운트할 수 있음. 컨테이너 안 래퍼는 우회되므로 프록시가 소켓을 가짐 |
+| 호스트 Docker (프록시 규칙) | 자기 프로젝트 것만 | 아래 표 |
 | 호스트 `~/.ssh`, 키체인 | 넣지 않음 | git은 `GH_TOKEN`(https)으로만 |
 | Claude 인증 | `setup-token` 토큰만 | 모델 호출만 가능. 정식 로그인은 호스트에만 |
 | OpenAI(Codex) 로그인 | 넣지 않음 | 호스트 imagegen MCP만 사용. 컨테이너는 이미지 URL만 받음 |
 | 권한 모드 | `bypassPermissions` (non-root) | 컨테이너가 경계. 네트워크 송신 제한은 아직 없음 (TBD) |
+
+### Docker 프록시 규칙 (`dockerproxy/server.py`)
+
+소유는 라벨 `agent-hub.project=<name>`. 생성 요청에 프록시가 강제로 넣고(사용자가 준 값은 덮어씀), 라벨이 없으면 다른 프로젝트 것으로 본다. `agent`·`docker` 서비스 자체에는 라벨이 없어 에이전트가 건드릴 수 없다.
+
+| API | 규칙 |
+|---|---|
+| `POST /containers/create` | 라벨 주입. bind 원본은 `PROJECT_DIR` 안만(심볼릭 링크를 풀어 확인, 푼 경로로 바꿔 전달). 소켓 마운트, `Privileged`, `CapAdd`, `Devices`·`DeviceRequests`, `CgroupParent`, `MaskedPaths`·`ReadonlyPaths`, `no-new-privileges` 외 `SecurityOpt`, Pid·Ipc·Userns·UTS·Cgroupns·Network의 `host`, 런타임·볼륨 드라이버 변경 거부. `container:<id>`·`VolumesFrom`·네트워크·이름 있는 볼륨은 자기 것만(없는 볼륨은 라벨을 붙여 먼저 만듦). 포트 게시(`-p`) 허용 |
+| `/containers/{id}/*`, `/exec/*` | 그 컨테이너에 라벨이 있을 때만. 경로를 전체 ID로 바꿔 전달. privileged exec 거부 |
+| `GET /containers/json`, `/volumes`, `/networks`, `/events` | 라벨 필터 강제 |
+| 볼륨·네트워크 생성 | 라벨 주입. 볼륨 드라이버 옵션은 `type=tmpfs`만(`o=bind`로 호스트 경로를 붙일 수 있어서), 네트워크 드라이버는 bridge만. 조회·삭제·connect는 라벨이 있는 것만 |
+| 이미지 pull·조회·push, `POST /build` | 허용. build는 라벨 주입, `networkmode=host` 거부, BuildKit(`/session`·`/grpc`) 미지원 → `DOCKER_BUILDKIT=0` |
+| 이미지 태그 쓰기 (build `-t`, `docker tag`) | 새 이름이나 이 프로젝트가 빌드한 이미지만. `agent-hub:*`는 예약 (덮어쓰면 다른 프로젝트·프록시가 그 코드를 실행) |
+| 이미지 삭제·prune, import·load, commit | 거부 (이미지 캐시는 모든 프로젝트 공유) |
+| `/_ping`, `/version`, `/info`, `/distribution` | 허용 |
+| 그 외 (swarm, plugins, `/system/df`, prune 전부 등) | 거부 |
+
+알려진 한계: bind 원본 확인과 데몬의 마운트 사이에 프로젝트 폴더 안 경로를 심볼릭 링크로 바꾸면 확인을 피할 수 있다(경쟁 조건, Docker API로는 막을 수 없음). 아직 아무도 받지 않은 이미지 이름(예: 새 `postgres` 태그)을 먼저 빌드해 두면 다른 프로젝트가 그것을 쓸 수 있다. 포트 게시는 프로젝트 간 충돌할 수 있다.
 
 ## 결정 기록
 
@@ -51,6 +71,9 @@ Mac mini
 | 2026-11-18 | 사용량: 작업 로그의 `rate_limit_event`로 계정별 5h·7d 사용률 추적, 95% 이상이면 새 작업 거부. 계정·모델은 프로젝트별로 중간에 변경 | 사용자 요청. 별도 API 없이 claude 출력만 사용 |
 | 2026-11-18 | SeaDrive는 설정·이미지 공유용. 코드 동기화에 쓰지 않음 | 코드는 맥미니에만 두고 SSH로 직접 봄 |
 | 2026-11-18 | 이미지 생성은 별도 서비스(MCP)로 제공, OpenAI 인증은 그 서비스에만 | 로그인 토큰 동시 갱신 충돌·노출 방지 (3단계) |
+| 2026-11-19 | 프로젝트 에이전트가 호스트 Docker를 쓴다(모든 프로젝트 기본). 자기 프로젝트 것만: 프로젝트별 프록시 사이드카가 소켓을 갖고 라벨로 소유를 판단 | 테스트 DB·compose 스택이 필요. 메인 에이전트는 채팅·검토용, 프로젝트 에이전트에는 넉넉한 권한, 통제는 harness (사용자 결정, #3) |
+| 2026-11-19 | 포트 게시(`-p`) 허용, `--network host`·이미지 삭제·prune 금지 | 프론트엔드 디버깅용 localhost. OrbStack의 host 네트워크는 맥과 같지 않음. 이미지 캐시는 공유 (사용자 결정) |
+| 2026-11-19 | `proj rm`은 라벨 붙은 컨테이너·네트워크·볼륨까지 삭제, `proj down`은 그 컨테이너를 멈춤. `proj idle`은 그 컨테이너를 활동으로 보지 않고 에이전트와 함께 멈춤 | 프로젝트는 compose·시드로 다시 띄울 수 있게 구성 (사용자 결정). 잊힌 DB가 메모리를 계속 쓰지 않게 |
 | 2026-11-18 | imagegen: 호스트 MCP 서버가 호스트 Codex의 ChatGPT(Plus) 로그인으로 생성, Codex는 셸 없이 읽기 전용, 결과는 URL로 내려받기 | 사용자가 API 키 대신 구독 OAuth를 원함. 별도 컨테이너·로그인 없이 호스트 하나만 인증 보유 |
 
 ## 단계
@@ -61,7 +84,8 @@ Mac mini
 | 2 | 통합 에이전트: `hub/CLAUDE.md`·`hub/settings.json`, `proj hub` (Remote Control 서버 모드, launchd), `proj new --create` | 구현. MacBook에서 확인: 웹·폰 Remote Control, 말로 지시 → `--create` 비공개 저장소 → 작업 커밋 → push·PR. launchd 등록은 맥미니에서 |
 | 3 | imagegen MCP | 구현. MacBook에서 확인: 실제 생성, Claude Code 연결, 컨테이너에서 내려받기. 맥미니 등록은 미확인 |
 | 3+ | `proj test` (테스트 스택), 작업 대기열 | 예정 |
-| 4 | 필요 시 dind 사이드카, code-server, 네트워크 송신 제한 | 예정 |
+| 3+ | 프로젝트별 Docker 프록시 (#3) | 구현. MacBook OrbStack에서 확인, 맥미니는 미확인 |
+| 4 | code-server, 네트워크 송신 제한 | 예정 |
 
 ## 미결정 (TBD)
 

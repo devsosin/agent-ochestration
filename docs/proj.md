@@ -6,7 +6,7 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `proj build` | 이미지 `agent-hub:base`, `agent-hub:rust` 빌드 (Claude Code 업데이트도 이것으로) |
+| `proj build` | 이미지 `agent-hub:base`, `agent-hub:rust`, `agent-hub:dockerproxy` 빌드 (Claude Code 업데이트도 이것으로) |
 | `proj account add <alias>` / `ls` | 계정 토큰 저장 / 목록 ([accounts.md](accounts.md)) |
 | `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g]` | `$WORKSPACE_ROOT/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 `Cargo.toml`이 있을 때 rust |
 | `proj new <name> --create [--public]` | 위와 같이 새로 만들고, 호스트 `gh`로 GitHub 저장소(기본 비공개)를 만들어 `origin`으로 push |
@@ -15,13 +15,13 @@
 | `proj image <name> <image>` | 이미지 바꾸고 컨테이너 재생성 (실행 중 작업이 있으면 거부) |
 | `proj model <name> [model\|-]` | 그 프로젝트 작업에 쓸 모델 (`-`는 기본값). 다음 작업부터 적용, 재시작 없음 |
 | `proj usage [--refresh]` | 계정별 5시간·7일 한도 사용률과 초기화 시각. `--refresh`는 계정마다 아주 짧은 요청(Haiku, 약 900토큰)을 보내 최신 값을 받음 |
-| `proj idle [시간]` / `idle install [시간]` / `idle uninstall` | 작업·셸·활동이 없는 지 N시간(기본 3) 지난 컨테이너 중지. `install`은 30분마다 실행하도록 launchd 등록. 멈춘 컨테이너는 다음 작업이나 `proj up`에서 다시 켜짐 |
+| `proj idle [시간]` / `idle install [시간]` / `idle uninstall` | 작업·셸·활동이 없는 지 N시간(기본 3) 지난 컨테이너 중지. 에이전트가 띄운 컨테이너(DB 등)는 활동으로 보지 않고 함께 멈춤. `install`은 30분마다 실행하도록 launchd 등록. 멈춘 컨테이너는 다음 작업이나 `proj up`에서 다시 켜짐 |
 | `proj hub init` / `login` / `run` / `install` / `uninstall` / `status` | 메인 에이전트 관리 (아래 "메인 에이전트") |
 | `proj imagegen install` / `uninstall` / `status` | 이미지 생성 MCP 서버를 launchd로 등록·해제·확인 (아래 "이미지 생성") |
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
-| `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지) / 컨테이너 셸 |
-| `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
+| `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지. 에이전트가 띄운 컨테이너는 멈추기만) / 컨테이너 셸 |
+| `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨, 에이전트가 띄운 컨테이너·네트워크·볼륨(라벨 `agent-hub.project=<name>`, DB 데이터 포함) 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
 | `proj task <name> [--repo <folder>] [--here] <지시…\|->` | 새 worktree에서 `claude -p` 백그라운드 실행. 워크스페이스는 `--repo`로 저장소를 고르고, 없으면 루트에서 실행. `-`는 표준입력에서 지시를 읽음 |
 | `proj reply <task> <지시…\|->` | 같은 세션을 이어서 실행 (`--resume`) |
 | `proj status [task\|name]` | 작업 목록(삭제된 프로젝트 제외) 또는 한 작업의 상태·비용·결과 보고 |
@@ -74,6 +74,18 @@
 | 비용 | 한 장 약 20초, Codex 약 2.8만 토큰(대부분 캐시) + ChatGPT 플랜의 이미지 한도 |
 | 준비 | 호스트에서 `codex login`(ChatGPT) → `proj imagegen install`. 이미지에 MCP 설정이 들어가므로 처음 한 번 `proj build` 후 `proj up <name>` |
 | 로그 | `~/.agent-hub/imagegen.log` |
+
+## Docker (프로젝트 컨테이너 안)
+
+| 항목 | 내용 |
+|---|---|
+| 접속 | `docker`, `docker compose`가 `DOCKER_HOST=tcp://docker:2375`(그 프로젝트의 프록시)로 호스트 Docker를 씀. 컨테이너에 소켓은 없음 |
+| 할 수 있는 것 | 자기 프로젝트 컨테이너·볼륨·네트워크 생성·조작, 프로젝트 폴더 안 bind mount(`-v $PWD:/app`), 포트 게시, 이미지 pull·build |
+| 막힌 것 | 프로젝트 폴더 밖 마운트, `--privileged`·`--cap-add`·장치, host PID/IPC/네트워크, 다른 프로젝트 것, 이미지 삭제·prune. 규칙: [architecture.md](architecture.md) "Docker 프록시 규칙" |
+| 게시한 포트 | 에이전트에서는 `host.docker.internal:<포트>`로 접속 (`localhost` 아님). 맥미니에서는 `localhost:<포트>` |
+| 빌드 | 클래식 빌더 (`DOCKER_BUILDKIT=0`). BuildKit 전용 문법(`RUN --mount` 등)은 안 됨 |
+| Testcontainers | `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`, Ryuk 끔(소켓 마운트가 필요해서). 남은 컨테이너는 `proj down`·`rm`이 라벨로 정리 |
+| 준비 | 이 기능 이전에 만든 프로젝트는 `proj build` 후 `proj up <name>` (프록시 서비스 추가) |
 
 ## 상태
 
