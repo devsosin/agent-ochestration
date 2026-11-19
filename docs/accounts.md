@@ -43,8 +43,8 @@ proj account ls                    # 값은 보여주지 않음
 
 - 작업 로그(`rate_limit_event`)에 계정의 5시간·7일 한도 사용률이 남는다. `proj usage`, `proj account ls`가 계정별 최근 값을 보여 주고, 초기화 시각이 지난 구간은 0%로 본다.
 - 작업 밖(메인 에이전트, 데스크톱 앱, claude.ai)에서 쓴 양은 로그에 없으므로, 작업을 시작할 때 값이 30분(`USAGE_STALE`)보다 오래됐으면 아주 짧은 요청(도구 없음, Haiku, 약 900토큰·0.0002달러)으로 먼저 갱신한다. `proj usage --refresh`는 바로 갱신. 결과는 `~/.agent-hub/usage/<alias>.jsonl`.
-- 새 작업은 한도 중 하나라도 `USAGE_MAX`(기본 95%) 이상이면 거부된다. 거부되면 아무 흔적(worktree, 기록)도 남기지 않는다.
-- 바꾸기: 프로젝트 계정 `proj account use <project> <alias>` (컨테이너 재생성, 실행 중 작업이 있으면 거부), 모델 `proj model <project> <model>`.
+- 새 작업은 한도 중 하나라도 `USAGE_MAX`(기본 95%) 이상이거나 Claude가 `rejected`로 보낼 때 거부된다. 약 75%부터 오는 경고(`allowed_warning`)로는 막지 않는다. 거부되면 아무 흔적(worktree, 기록)도 남기지 않는다.
+- 바꾸기: 프로젝트 계정 `proj account use <project> <alias>` (컨테이너를 강제로 다시 만들고 들어간 토큰이 그 계정 것인지 해시로 확인, 실행 중 작업이 있으면 거부), 모델 `proj model <project> <model>`.
 - 메인 에이전트(`~/.claude-<alias>`)도 같은 계정이면 같은 한도를 쓴다.
 
 ## 호스트 CLI에서 계정 나누기
