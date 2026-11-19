@@ -10,7 +10,7 @@
    └─ 파일·diff: VS Code Remote-SSH(Tailscale) / vscode.dev 터널 ─▶ 맥미니 ~/workspace
 Mac mini
  ├─ 통합 에이전트: 호스트의 claude, bin/proj 만 호출          (2단계)
- ├─ proj-<name> 컨테이너: claude -p, harness 플러그인, 계정 토큰
+ ├─ proj-<name> 컨테이너: claude -p, harness·켠 플러그인, 계정 토큰
  │    └─ ~/workspace/<name> (호스트와 같은 절대경로로 마운트)
  └─ ~/.agent-hub: 계정·프로젝트 설정·작업 기록
 ```
@@ -21,7 +21,8 @@ Mac mini
 | `agent-hub:base` / `agent-hub:rust` | 이미지 | Claude Code, gh, git, Node (+ Rust) |
 | `compose/project.yml` | 프로젝트당 compose 프로젝트 `proj-<name>` | 마운트·시크릿·메모리 상한. 서비스 `agent`(에이전트), `docker`(Docker 프록시) |
 | `agent-hub:dockerproxy` | 이미지 (`dockerproxy/`) | 호스트 Docker 소켓을 갖고 그 프로젝트 것만 통과시키는 API 프록시 (아래 보안 경계) |
-| harness | `~/workspace/harness` → `/opt/harness:ro` | managed settings로 마켓플레이스 등록·활성화. 호스트에서 고치면 다음 세션부터 반영 |
+| harness | `~/workspace/harness` → `/opt/harness:ro` | managed settings로 마켓플레이스 등록·활성화(기본 켬). 호스트에서 고치면 다음 세션부터 반영 |
+| 플러그인 | `~/.agent-hub/plugins/<marketplace>/` → `/opt/plugins:ro` | `proj plugin source add`로 호스트에 git clone. 프로젝트별 managed settings(`~/.agent-hub/projects/<name>.managed-settings.json` → `/etc/claude-code/managed-settings.json:ro`)로 켜고 끄고 `env`로 옵션 전달 |
 | 계정 | `~/.agent-hub/accounts/<alias>/` | [accounts.md](accounts.md) |
 
 ## 보안 경계
@@ -33,6 +34,7 @@ Mac mini
 | 호스트 `~/.ssh`, 키체인 | 넣지 않음 | git은 `GH_TOKEN`(https)으로만 |
 | Claude 인증 | `setup-token` 토큰만 | 모델 호출만 가능. 정식 로그인은 호스트에만 |
 | OpenAI(Codex) 로그인 | 넣지 않음 | 호스트 imagegen MCP만 사용. 컨테이너는 이미지 URL만 받음 |
+| 플러그인 코드·managed settings | 읽기 전용 마운트 | 플러그인 hook은 컨테이너에서 코드를 실행하므로 코드는 호스트에서만 바뀜(`proj plugin source add`·`update`). 켜는 플러그인과 옵션도 호스트 파일이라 에이전트가 바꿀 수 없음. 마켓플레이스 폴더는 모든 프로젝트에 보이지만 켜진 것만 로드됨 |
 | 권한 모드 | `bypassPermissions` (non-root) | 컨테이너가 경계. 네트워크 송신 제한은 아직 없음 (TBD) |
 
 ### Docker 프록시 규칙 (`dockerproxy/server.py`)
@@ -76,6 +78,7 @@ Mac mini
 | 2026-11-19 | `proj rm`은 라벨 붙은 컨테이너·네트워크·볼륨까지 삭제, `proj down`은 그 컨테이너를 멈춤. `proj idle`은 그 컨테이너를 활동으로 보지 않고 에이전트와 함께 멈춤 | 프로젝트는 compose·시드로 다시 띄울 수 있게 구성 (사용자 결정). 잊힌 DB가 메모리를 계속 쓰지 않게 |
 | 2026-11-18 | imagegen: 호스트 MCP 서버가 호스트 Codex의 ChatGPT(Plus) 로그인으로 생성, Codex는 셸 없이 읽기 전용, 결과는 URL로 내려받기 | 사용자가 API 키 대신 구독 OAuth를 원함. 별도 컨테이너·로그인 없이 호스트 하나만 인증 보유 |
 | 2026-11-19 | 작업은 체크아웃에서 기본 브랜치로부터 `agent/<id>`를 만들어 커밋. 커밋 안 된 변경이 있거나 같은 폴더에 실행 중인 작업이 있으면 거부. 워크스페이스 `--repo`도 같은 규칙. worktree는 `proj task --worktree`로 명시할 때만, 서브에이전트 병렬은 Claude Code worktree 격리(`isolation: worktree`) (#1) | 프로젝트당 에이전트 하나(1:1). VS Code에서 폴더 하나로 리뷰, worktree가 쌓이지 않음 (사용자 결정) |
+| 2026-11-19 | 플러그인은 호스트 `~/.agent-hub/plugins/`에 git clone해 모든 컨테이너에 읽기 전용으로 올리고, 프로젝트별 managed settings로 켜고 끈다. 옵션은 settings `env`, harness는 기본 켬(`rm`으로 끌 수 있음). 메인 에이전트는 `proj plugin source add`·`update`·`ls`를 바로 실행, 프로젝트별 `add`·`rm`은 사용자 승인 후 (#6) | 컨테이너 안에서 플러그인을 설치할 수 없다는 프로젝트 에이전트 보고. managed settings는 신뢰 확인이 없어 `claude -p`에서도 동작, 버전은 호스트에서 고정 (사용자 결정) |
 
 ## 단계
 
@@ -86,6 +89,7 @@ Mac mini
 | 3 | imagegen MCP | 구현. MacBook에서 확인: 실제 생성, Claude Code 연결, 컨테이너에서 내려받기. 맥미니 등록은 미확인 |
 | 3+ | `proj test` (테스트 스택), 작업 대기열 | 예정 |
 | 3+ | 프로젝트별 Docker 프록시 (#3) | 구현. MacBook OrbStack에서 확인, 맥미니는 미확인 |
+| 3+ | 프로젝트별 플러그인 `proj plugin` (#6) | 구현. MacBook OrbStack에서 확인(가짜 토큰: ponytail SessionStart hook `level: full`, 다른 프로젝트엔 없음, 읽기 전용). 실제 토큰 작업·맥미니는 미확인 |
 | 4 | code-server, 네트워크 송신 제한 | 예정 |
 
 ## 미결정 (TBD)

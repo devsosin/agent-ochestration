@@ -99,6 +99,49 @@ check "hub settings: workspace read rule" yes "$(jq -e '.permissions.allow | ind
 check "hub settings: accounts deny follows hub home" "Read(/$AGENT_HUB_HOME/accounts/**)" "$(jq -r '.permissions.deny[0]' "$s")"
 check "hub settings: plain additionalDirectories" "$HOME/Storage" "$(jq -r '.permissions.additionalDirectories[0]' "$s")"
 
+check "hub may manage plugin sources" yes "$(jq -e '.permissions.allow | index("Bash(proj plugin source*)")' "$s" >/dev/null && echo yes || echo no)"
+check "hub has no allow rule for per-project plugin add/rm" 0 "$(jq '[.permissions.allow[] | select(test("proj plugin \\*|proj plugin [^sl]"))] | length' "$s")"
+
+# Plugins: marketplace clones on the host, per-project managed settings.
+src="$(mktemp -d)"; mkdir -p "$src/.claude-plugin"
+printf '{"name":"pony-mkt","plugins":[{"name":"ponytail","source":"./"}]}\n' > "$src/.claude-plugin/marketplace.json"
+git -C "$src" init -q -b main && git -C "$src" add -A && git -C "$src" -c user.name=t -c user.email=t@t commit -q -m init
+plugin_source add "file://$src" >/dev/null
+check "source add names the folder after marketplace.json" yes "$([ -f "$PLUGINS_DIR/pony-mkt/.claude-plugin/marketplace.json" ] && echo yes || echo no)"
+check "source add leaves no temp folder" "" "$(ls -A "$PLUGINS_DIR" | grep '^\.add' || true)"
+check "source add refuses an existing marketplace" "already exists" "$( (plugin_source add "file://$src") 2>&1 | grep -o 'already exists' || true)"
+check "source ls lists plugins" 1 "$(plugin_source ls | grep -c 'pony-mkt.*plugins: ponytail')"
+rm -rf "$src"
+mkdir -p "$AGENT_HUB_HOME/harness/.claude-plugin"
+printf '{"name":"devsosin-harness","plugins":[{"name":"harness"}]}\n' > "$AGENT_HUB_HOME/harness/.claude-plugin/marketplace.json"
+printf 'PROJECT_NAME=p1\nHARNESS_DIR=%s\n' "$AGENT_HUB_HOME/harness" > "$(env_file p1)"
+printf 'PROJECT_NAME=p2\nHARNESS_DIR=%s\n' "$AGENT_HUB_HOME/harness" > "$(env_file p2)"
+sf="$(settings_file p1)"
+ensure_settings p1
+check "default settings: harness on" true "$(jq '.enabledPlugins["harness@devsosin-harness"]' "$sf")"
+check "default settings: harness marketplace at /opt/harness" /opt/harness "$(jq -r '.extraKnownMarketplaces["devsosin-harness"].source.path' "$sf")"
+ino="$(stat -f %i "$sf")"
+plugin_add p1 ponytail@pony-mkt --env PONYTAIL_DEFAULT_MODE=full --env X=a=b >/dev/null
+check "add enables the plugin" true "$(jq '.enabledPlugins["ponytail@pony-mkt"]' "$sf")"
+check "add registers its directory marketplace" /opt/plugins/pony-mkt "$(jq -r '.extraKnownMarketplaces["pony-mkt"].source.path' "$sf")"
+check "add sets env options" full "$(jq -r '.env.PONYTAIL_DEFAULT_MODE' "$sf")"
+check "env value keeps '='" a=b "$(jq -r '.env.X' "$sf")"
+check "settings rewritten in place (bind mount keeps the inode)" "$ino" "$(stat -f %i "$sf")"
+check "other project unaffected" null "$(ensure_settings p2; jq '.enabledPlugins["ponytail@pony-mkt"]' "$(settings_file p2)")"
+check "ls shows plugins and env" 1 "$(plugin_ls p1 | grep -c 'ponytail@pony-mkt.*PONYTAIL_DEFAULT_MODE=full')"
+plugin_add p1 ponytail@pony-mkt --env X= >/dev/null
+check "KEY= removes an env option" null "$(jq '.env.X' "$sf")"
+check "unknown plugin refused" "no plugin" "$( (plugin_add p1 nope@pony-mkt) 2>&1 | grep -o 'no plugin' || true)"
+check "unknown marketplace refused" "no plugin" "$( (plugin_add p1 x@missing) 2>&1 | grep -o 'no plugin' || true)"
+check "bad --env refused" "KEY=VALUE" "$( (plugin_add p1 ponytail@pony-mkt --env 1X=y) 2>&1 | grep -o 'KEY=VALUE' || true)"
+plugin_rm p1 ponytail@pony-mkt >/dev/null
+check "rm disables the plugin" null "$(jq '.enabledPlugins["ponytail@pony-mkt"]' "$sf")"
+check "rm drops the unused marketplace" null "$(jq '.extraKnownMarketplaces["pony-mkt"]' "$sf")"
+plugin_rm p1 harness@devsosin-harness >/dev/null
+check "harness can be turned off, marketplace stays" "null /opt/harness" "$(jq -r '"\(.enabledPlugins["harness@devsosin-harness"]) \(.extraKnownMarketplaces["devsosin-harness"].source.path)"' "$sf")"
+check "rm of a plugin that is off refused" "is not on" "$( (plugin_rm p1 harness@devsosin-harness) 2>&1 | grep -o 'is not on' || true)"
+rm -f "$(env_file p1)" "$(env_file p2)" "$sf" "$(settings_file p2)"
+
 # Tasks run in the checkout on a new branch from the default branch; --worktree opts into .worktrees/<id>.
 r="$(mktemp -d)"; g() { git -C "$r" -c user.name=t -c user.email=t@t "$@"; }
 git -C "$r" init -q -b main; g commit -q --allow-empty -m init

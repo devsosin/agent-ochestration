@@ -21,6 +21,9 @@ services:
     volumes:
       - ${PROJECT_DIR}:${PROJECT_DIR}
       - ${HARNESS_DIR:?}:/opt/harness:ro
+      # Plugin marketplaces and this project's managed settings; bin/proj sets both paths (proj plugin).
+      - ${PLUGINS_DIR:?}:/opt/plugins:ro
+      - ${MANAGED_SETTINGS:?}:/etc/claude-code/managed-settings.json:ro
       - ${TASKS_DIR:?}:/var/agent-hub/tasks
       - claude-config:/home/node/.claude
       - cargo-registry:/usr/local/cargo/registry

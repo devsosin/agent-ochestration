@@ -17,6 +17,8 @@
       "Bash(proj wait*)",
       "Bash(proj usage*)",
       "Bash(proj model*)",
+      "Bash(proj plugin source*)",
+      "Bash(proj plugin ls*)",
       "Bash(git -C * log*)",
       "Bash(git -C * diff*)",
       "Bash(git -C * status*)",
