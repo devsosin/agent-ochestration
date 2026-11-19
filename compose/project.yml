@@ -8,6 +8,12 @@ services:
     working_dir: ${PROJECT_DIR:?}
     environment:
       CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-4}
+      # Host Docker only through the project's proxy below; the agent never gets the socket.
+      DOCKER_HOST: tcp://docker:2375
+      DOCKER_BUILDKIT: "0"  # BuildKit needs /session and /grpc, which the proxy does not pass
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal  # published ports are on the host, not on `docker`
+      TESTCONTAINERS_RYUK_DISABLED: "true"  # Ryuk mounts the socket; proj down/rm clean up by label instead
+    depends_on: [docker]
     env_file:
       - path: ${ACCOUNT_DIR:?}/git.env
         required: false
@@ -20,6 +26,21 @@ services:
       - cargo-registry:/usr/local/cargo/registry
       - cargo-git:/usr/local/cargo/git
     mem_limit: ${MEM_LIMIT:-6g}
+
+  # Docker API proxy (dockerproxy/server.py): holds the host socket, lets the agent use only this project's
+  # containers, volumes and networks (label agent-hub.project). Never label this service or `agent`.
+  docker:
+    image: agent-hub:dockerproxy
+    init: true
+    read_only: true
+    environment:
+      PROJECT_NAME: ${PROJECT_NAME:?}
+      PROJECT_DIR: ${PROJECT_DIR}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Same path read-only, to resolve symlinks in bind mount sources.
+      - ${PROJECT_DIR}:${PROJECT_DIR}:ro
+    mem_limit: 64m
 
 volumes:
   claude-config:

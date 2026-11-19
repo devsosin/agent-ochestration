@@ -16,10 +16,12 @@ mac-agent/
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
 │   └── gitconfig            # gh credential helper, ssh→https rewrite, safe.directory
 ├── compose/project.yml      # one compose project per registered project (proj-<name>)
+├── dockerproxy/           # Docker API proxy sidecar (compose service `docker`): server.py + Dockerfile, stdlib Python
 ├── imagegen/server.py       # image MCP on the host (Codex CLI with the host's ChatGPT login), stdlib Python
 ├── hub/                     # main agent: CLAUDE.md (its operating guide, linked into ~/.agent-hub/hub) + settings.json (permissions)
 ├── tests/proj.test.sh       # unit checks for bin/proj helpers
 ├── tests/imagegen.test.sh   # imagegen server against a fake codex
+├── tests/dockerproxy_test.py  # proxy rules against a fake daemon
 └── docs/                    # Korean, compact: architecture, accounts, proj, setup-macmini
 ```
 
@@ -50,10 +52,10 @@ Runtime state lives outside the repo (never commit it):
 
 - GitHub: repo creation and other admin actions use the host `gh` login (`proj new --create`); containers only get the account's fine-grained token without Administration.
 - `hub/settings.json` is the hub's permission boundary: widen it only with the user's agreement, and keep the deny on `~/.agent-hub/accounts/**`.
-- Project containers never get the Docker socket, host `~/.ssh`, or the hub's Claude login — whoever holds the socket controls every bind-mountable path under `/Users`.
+- Project containers never get the Docker socket, host `~/.ssh`, or the hub's Claude login — whoever holds the socket controls every bind-mountable path under `/Users`. They use host Docker only through their own `docker` proxy service (`dockerproxy/server.py`), which limits them to objects labelled `agent-hub.project=<name>` and bind mounts inside the project dir. Widen its rules only with the user's agreement; never label the `agent` or `docker` services, and never let a project write `agent-hub:*` images.
 - Mount the project dir at the same absolute path in the container — git worktrees store absolute paths, and the host (VS Code, hub) must open worktrees the container created.
 - `bin/proj` must run on macOS `/bin/bash` 3.2: no `${x,,}`, associative arrays, `mapfile`.
-- `proj rm` removes containers and the project's Claude config volume only; never delete a project directory, a DB volume, or the shared `cargo-*` volumes from code.
+- `proj rm` removes the project's containers, its Claude config volume, and the containers/networks/volumes labelled `agent-hub.project=<name>` (user decision: projects keep their compose/seed so these can be re-created). Never delete a project directory (except `--purge` checks), unlabelled volumes, or the shared `cargo-*` volumes from code.
 - No unscoped `docker system prune` / `volume prune` — it deletes other projects' data. Clean up per compose project (`harness:cleanup`).
 - Secrets: never print token values or write them to logs, commits, or chat. Read them only from `/run/secrets` inside containers.
 
@@ -62,7 +64,8 @@ Runtime state lives outside the repo (never commit it):
 ```bash
 bash tests/proj.test.sh                 # helper unit checks
 bash tests/imagegen.test.sh             # imagegen MCP server (fake codex)
-bin/proj build                          # builds agent-hub:base and agent-hub:rust
+python3 tests/dockerproxy_test.py       # Docker proxy rules (fake daemon)
+bin/proj build                          # builds agent-hub:base, agent-hub:rust, agent-hub:dockerproxy
 ```
 
 Smoke test without touching real state (scratch dirs, fake token; task fails on auth but exercises the pipeline):

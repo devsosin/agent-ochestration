@@ -42,6 +42,19 @@ dc() { # dc <name> <compose args...>
   docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" "$@"
 }
 
+# Containers, volumes, networks the project's agent made through its Docker proxy (dockerproxy/server.py).
+label_filter() { printf 'label=agent-hub.project=%s' "$1"; }
+stop_started() { # stop_started <name>: stops the project's own containers (not its agent/proxy)
+  local ids; ids="$(docker ps -q --filter "$(label_filter "$1")")"
+  [ -z "$ids" ] || docker stop $ids >/dev/null
+}
+rm_started() { # rm_started <name>: deletes everything carrying the project label (user decision: re-creatable)
+  local f ids; f="$(label_filter "$1")"
+  ids="$(docker ps -aq --filter "$f")"; [ -z "$ids" ] || docker rm -f -v $ids >/dev/null
+  ids="$(docker network ls -q --filter "$f")"; [ -z "$ids" ] || docker network rm $ids >/dev/null
+  ids="$(docker volume ls -q --filter "$f")"; [ -z "$ids" ] || docker volume rm $ids >/dev/null
+}
+
 ensure_up() {
   [ "$(docker inspect -f '{{.State.Running}}' "$(container "$1")" 2>/dev/null)" = true ] || dc "$1" up -d --quiet-pull >/dev/null
 }
@@ -122,6 +135,7 @@ account_ls() {
 # --- projects -----------------------------------------------------------------
 
 cmd_build() {
+  docker build -t agent-hub:dockerproxy "$REPO_DIR/dockerproxy"
   docker build --target base -t agent-hub:base "$REPO_DIR/image"
   docker build --target rust -t agent-hub:rust "$REPO_DIR/image"
 }
@@ -263,7 +277,7 @@ cmd_ls() {
 }
 
 cmd_up() { require_project "${1:-}"; dc "$1" up -d; }
-cmd_down() { require_project "${1:-}"; dc "$1" down; }
+cmd_down() { require_project "${1:-}"; stop_started "$1"; dc "$1" down; }
 
 cmd_rm() { # proj rm <name> [--purge] [--yes]
   local name="${1:-}" purge=0 yes=0 dir unsaved what ans root
@@ -273,7 +287,7 @@ cmd_rm() { # proj rm <name> [--purge] [--yes]
   done
   [ -z "$(running_tasks "$name")" ] || die "$name has running tasks"
   dir="$(project_var "$name" PROJECT_DIR)"
-  what="containers and Claude config volume"
+  what="containers, Claude config volume, and the containers/volumes/networks the agent started (label agent-hub.project=$name)"
   if [ "$purge" = 1 ]; then
     root="$(cd "$WORKSPACE_ROOT" && pwd -P)"
     case "$dir" in "$root"/?*) ;; *) die "refusing to delete $dir: not inside $root" ;; esac
@@ -288,6 +302,7 @@ $unsaved"
     read -rp "remove $what of '$name'? [y/N] " ans
     [ "$ans" = y ] || exit 0
   fi
+  rm_started "$name"
   dc "$name" down -v
   rm "$(env_file "$name")"
   if [ "$purge" = 1 ]; then
@@ -530,6 +545,8 @@ idle_stop() { # stops running containers with no task, no shell, and no activity
     [ "$busy" = 0 ] || continue
     idle=$(( $(date +%s) - $(last_activity "$name") ))
     if [ "$idle" -ge $(( hours * 3600 )) ]; then
+      # Containers the agent started (test DBs, dev servers) are not activity; they stop with it.
+      stop_started "$name" 2>/dev/null || true
       dc "$name" stop >/dev/null 2>&1 && echo "$(date '+%F %T') stopped $name (idle $(( idle / 60 )) min)"
     fi
   done
@@ -851,7 +868,7 @@ usage() {
   cat <<'EOF'
 proj — per-project agent containers (docs/proj.md)
 
-  proj build                               build agent-hub:base and agent-hub:rust
+  proj build                               build agent-hub:base, agent-hub:rust, agent-hub:dockerproxy
   proj account add <alias> | ls            store / list account tokens
   proj new <name> [--repo URL|owner/name | --create [--public] | --workspace] [--alias 별칭] [--account A] [--image I] [--mem 6g]
   proj add <workspace> <folder> [--repo URL|owner/name | --create [--public]]   add a repo to a workspace
@@ -864,7 +881,7 @@ proj — per-project agent containers (docs/proj.md)
   proj imagegen install|uninstall|status|run         image MCP for containers (host Codex login)
   proj alias <name> <별칭>                  set the alias the hub matches (e.g. 스모크)
   proj ls | up <name> | down <name> | shell <name>
-  proj rm <name> [--purge] [--yes]         --purge also deletes the folder and task records
+  proj rm <name> [--purge] [--yes]         also deletes what the agent started in Docker; --purge: folder, task records
   proj task <name> [--repo <folder>] [--worktree] <prompt...|->  run claude on a new branch agent/<id> in the checkout (--worktree: in .worktrees/<id>, for parallel work)
   proj reply <task> <prompt...|->          continue the task's session
   proj status [task|name] | wait <task> [secs] | logs <task> [-f] | diff <task> | close <task>
