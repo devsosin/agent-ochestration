@@ -75,6 +75,7 @@ Mac mini
 | 2026-11-19 | 포트 게시(`-p`) 허용, `--network host`·이미지 삭제·prune 금지 | 프론트엔드 디버깅용 localhost. OrbStack의 host 네트워크는 맥과 같지 않음. 이미지 캐시는 공유 (사용자 결정) |
 | 2026-11-19 | `proj rm`은 라벨 붙은 컨테이너·네트워크·볼륨까지 삭제, `proj down`은 그 컨테이너를 멈춤. `proj idle`은 그 컨테이너를 활동으로 보지 않고 에이전트와 함께 멈춤 | 프로젝트는 compose·시드로 다시 띄울 수 있게 구성 (사용자 결정). 잊힌 DB가 메모리를 계속 쓰지 않게 |
 | 2026-11-18 | imagegen: 호스트 MCP 서버가 호스트 Codex의 ChatGPT(Plus) 로그인으로 생성, Codex는 셸 없이 읽기 전용, 결과는 URL로 내려받기 | 사용자가 API 키 대신 구독 OAuth를 원함. 별도 컨테이너·로그인 없이 호스트 하나만 인증 보유 |
+| 2026-11-19 | 대화 기록은 작업 폴더의 `transcript.md`(일시 포함)로 남긴다. 원본은 Claude Code 세션 파일: 컨테이너 `~/.claude/projects`만 `~/.agent-hub/sessions/<name>/`에 바인드 마운트하고, `proj`가 호스트에서 만든다. DB·컨테이너 안 스킬·스크립트는 쓰지 않음. 보관은 `proj rm --purge` 전까지 (#2) | 사후 확인용. 세션 기록에 줄마다 `timestamp`가 있고 서브에이전트 기록도 같은 곳에 남음. 에이전트가 직접 남기면 빠뜨리거나 토큰을 씀 (사용자 결정) |
 | 2026-11-19 | 작업은 체크아웃에서 기본 브랜치로부터 `agent/<id>`를 만들어 커밋. 커밋 안 된 변경이 있거나 같은 폴더에 실행 중인 작업이 있으면 거부. 워크스페이스 `--repo`도 같은 규칙. worktree는 `proj task --worktree`로 명시할 때만, 서브에이전트 병렬은 Claude Code worktree 격리(`isolation: worktree`) (#1) | 프로젝트당 에이전트 하나(1:1). VS Code에서 폴더 하나로 리뷰, worktree가 쌓이지 않음 (사용자 결정) |
 
 ## 단계

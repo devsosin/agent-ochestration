@@ -32,7 +32,8 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/config` | optional overrides: `WORKSPACE_ROOT`, `HARNESS_DIR`, `DEFAULT_ACCOUNT`, `MAX_TASKS` |
 | `~/.agent-hub/accounts/<alias>/` | `claude.token`, `gh.token`, `git.env` — secrets, mode 700/600 |
 | `~/.agent-hub/projects/<name>.env` | compose variables for one project |
-| `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container) |
+| `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container), `transcript.md` (built on the host, `proj transcript`) |
+| `~/.agent-hub/sessions/<name>/` | Claude Code session files of that project's container (bind mount of `/home/node/.claude/projects`), source of `transcript.md` |
 | `~/.agent-hub/usage/<alias>.jsonl` | latest rate-limit probe result per account (`proj usage --refresh`) |
 | `~/.agent-hub/imagegen/`, `imagegen.log` | generated images (24 h) and log of `proj imagegen run` (launchd `com.agent-hub.imagegen`) |
 | `~/.agent-hub/idle.log` | `proj idle` runs from launchd (`com.agent-hub.idle`) |
