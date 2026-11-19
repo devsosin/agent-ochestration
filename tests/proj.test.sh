@@ -99,4 +99,43 @@ check "hub settings: workspace read rule" yes "$(jq -e '.permissions.allow | ind
 check "hub settings: accounts deny follows hub home" "Read(/$AGENT_HUB_HOME/accounts/**)" "$(jq -r '.permissions.deny[0]' "$s")"
 check "hub settings: plain additionalDirectories" "$HOME/Storage" "$(jq -r '.permissions.additionalDirectories[0]' "$s")"
 
+# Tasks run in the checkout on a new branch from the default branch; --worktree opts into .worktrees/<id>.
+r="$(mktemp -d)"; g() { git -C "$r" -c user.name=t -c user.email=t@t "$@"; }
+git -C "$r" init -q -b main; g commit -q --allow-empty -m init
+g switch -q -c agent/old; g commit -q --allow-empty -m old   # an earlier task's branch is still checked out
+task_workdir "$r" c1 0
+check "checkout task: workdir is the checkout" "$r" "$WORKDIR"
+check "checkout task: new branch checked out" "agent/c1" "$(git -C "$r" rev-parse --abbrev-ref HEAD)"
+check "checkout task: branches from the default branch" "main" "$BASE"
+check "checkout task: starts at main, not the old task branch" "$(git -C "$r" rev-parse main)" "$(git -C "$r" rev-parse HEAD)"
+check "checkout task: no .worktrees" no "$([ -e "$r/.worktrees" ] && echo yes || echo no)"
+echo x > "$r/f.txt"
+check "dirty checkout is refused" "uncommitted changes" "$( (task_workdir "$r" c2 0) 2>&1 | grep -o 'uncommitted changes' || true)"
+check "refused task leaves the branch alone" "agent/c1" "$(git -C "$r" rev-parse --abbrev-ref HEAD)"
+check "dirty checkout still allows --worktree" "$r/.worktrees/c3" "$(task_workdir "$r" c3 1 && echo "$WORKDIR")"
+check "worktree task: own branch in the worktree" "agent/c3" "$(git -C "$r/.worktrees/c3" rev-parse --abbrev-ref HEAD)"
+check ".worktrees is not a change in the checkout" "?? f.txt" "$(git -C "$r" status --porcelain)"
+rm "$r/f.txt"
+td="$AGENT_HUB_HOME/tasks/demo/c1"; mkdir -p "$td"; printf 'PROJECT=demo\nWORKDIR=%s\n' "$r" > "$td/meta"
+check "second task in the same checkout is refused" "already working" "$( (running_tasks() { echo "$td"; }; task_workdir "$r" c4 0) 2>&1 | grep -o 'already working' || true)"
+check "task in a subfolder of a running task's folder is refused" "already working" "$( (running_tasks() { echo "$td"; }; mkdir -p "$r/sub"; task_workdir "$r/sub" c5 0) 2>&1 | grep -o 'already working' || true)"
+rmdir "$r/sub"
+printf 'PROJECT=demo\nWORKDIR=%s\n' "$r/.worktrees/c3" > "$td/meta"
+check "running --worktree task does not block the checkout" "agent/c6" "$( (running_tasks() { echo "$td"; }; task_workdir "$r" c6 0 && git -C "$r" rev-parse --abbrev-ref HEAD) 2>&1)"
+git -C "$r" switch -q agent/c1
+
+# diff shows the task branch even after the checkout moved on; close only switches back when clean.
+printf 'PROJECT=demo\nWORKDIR=%s\nBRANCH=agent/c1\nBASE=main\n' "$r" > "$td/meta"; echo 0 > "$td/exit"
+g commit -q --allow-empty -m "task work"
+check "diff lists the task branch commits" 1 "$(cmd_diff c1 | grep -c 'task work')"
+echo x > "$r/f.txt"
+check "close keeps a dirty checkout on the branch" "agent/c1" "$(cmd_close c1 >/dev/null; git -C "$r" rev-parse --abbrev-ref HEAD)"
+rm "$r/f.txt"; cmd_close c1 >/dev/null
+check "close switches a clean checkout back to main" "main" "$(git -C "$r" rev-parse --abbrev-ref HEAD)"
+check "close keeps the task branch" yes "$(git -C "$r" rev-parse -q --verify agent/c1 >/dev/null && echo yes || echo no)"
+check "diff still shows the branch after close" 1 "$(cmd_diff c1 | grep -c 'task work')"
+printf '%s\n' '{"type":"system","subtype":"init","session_id":"s-c1"}' > "$td/log.jsonl"
+check "reply switches the checkout back to the task branch" "agent/c1" "$( (launch() { :; }; cmd_reply c1 more) >/dev/null; git -C "$r" rev-parse --abbrev-ref HEAD)"
+rm -rf "$r" "$td"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
