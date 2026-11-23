@@ -66,7 +66,17 @@
 | 4 | `proj hub run` | 처음 한 번은 터미널에서: Remote Control 활성화 확인에 `y` |
 | 5 | `proj hub install` | launchd 등록 (로그인 시 시작, 꺼지면 30초 후 재시작). 로그: `~/.agent-hub/hub/hub.log` |
 
-접속: claude.ai/code 또는 Claude 앱의 세션 목록에서 `hub`.
+접속: claude.ai/code 또는 Claude 앱의 세션 목록에서 `hub`. 앱에서 새 세션을 열면 같은 hub에 채팅방이 하나 더 생긴다(Remote Control 서버 모드). 작업 상태는 `proj`로 모든 세션이 공유한다.
+
+계정 전환 (한도에 걸렸을 때):
+
+| 순서 | 명령 | 비고 |
+|---|---|---|
+| 1 | `proj hub login --account fins` | 계정마다 처음 한 번, 맥미니 화면에서. 브라우저 로그인 → 폴더 신뢰 `y` → `/exit` |
+| 2 | `proj hub run --account fins` | 처음 한 번. "Enable Remote Control?" `y` → 연결되면 Ctrl+C |
+| 3 | `proj hub use fins` | `HUB_ACCOUNT` 변경 후 서비스 재시작. 그 계정의 Claude 앱에서 `hub` 사용. 로그인 안 된 계정이면 거부 |
+
+채팅 기록은 계정별로 따로 남고 옮기지 않는다. 새 계정의 hub는 `proj status`·작업 기록으로 이어 간다. `proj hub status`는 현재 계정과 사용량도 보여 준다.
 
 ## 이미지 생성 (imagegen)
 
