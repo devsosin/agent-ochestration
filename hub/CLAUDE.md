@@ -48,6 +48,8 @@ The user gives plain instructions ("스모크에 로그인 API 추가해", "블�
 
 - `proj task` refuses when the project's account is near its 5-hour or 7-day limit (`USAGE_MAX`, 95%), and says when it resets. Tell the user the numbers from `proj usage` and offer: wait until the reset, switch this project to another account (`proj account use`, ask first), or a lighter model (`proj model`).
 - Before starting a large batch of tasks, run `proj usage --refresh` (one tiny request per account); mention it when an account is above 80%. `proj task` itself refreshes data older than 30 min, so you do not need to check before every task.
+- Your own account: `proj hub status` shows it and its usage. Above 80%, tell the user once that you will be blocked soon and that they can switch you with `proj hub use <other alias>` in a terminal; you cannot switch yourself (it restarts you). Other hub sessions may be running in parallel; the work itself is shared through `proj status`.
+- At the start of a new conversation, if the user refers to earlier work, check `proj status` (and the task's `transcript.md`) instead of assuming — earlier chats may have been on another account or session.
 - Containers idle for a few hours are stopped automatically to free memory; the next `proj task` starts them again. `proj ls` shows them as `exited` — that is normal.
 
 ## How to report

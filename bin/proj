@@ -484,6 +484,13 @@ hub_settings() { # hub/settings.json with ~/workspace and ~/.agent-hub replaced 
       -e "s|~/workspace|$ws|g" -e "s|~/\.agent-hub|$hub|g" "$REPO_DIR/hub/settings.json" > "$out"
   echo "$out"
 }
+hub_ready() { # hub_ready <alias>: that account's host Claude config is logged in (proj hub login --account <alias>)
+  jq -e '.oauthAccount' "$HOME/.claude-$1/.claude.json" >/dev/null 2>&1
+}
+config_set() { # config_set <KEY> <value>: replace one line of $HUB/config
+  local f="$HUB/config"; mkdir -p "$HUB"; touch "$f"
+  { grep -v "^$1=" "$f" || true; echo "$1=$2"; } > "$f.tmp" && mv "$f.tmp" "$f"
+}
 hub_claude() { # runs claude with the hub account's own login
   local bin="${CLAUDE_BIN:-$(command -v claude || true)}"
   [ -n "$bin" ] || die "claude CLI not found (install it, or set CLAUDE_BIN)"
@@ -493,6 +500,8 @@ hub_claude() { # runs claude with the hub account's own login
 
 cmd_hub() {
   local sub="${1:-status}"; shift || true
+  # First-time setup of another account: proj hub login|run --account <alias>
+  if [ "${1:-}" = --account ]; then HUB_ACCOUNT="${2:-}"; shift 2; fi
   case "$sub" in
     init)
       mkdir -p "$(hub_dir)"
@@ -506,10 +515,18 @@ cmd_hub() {
       hub_claude remote-control --name hub --settings "$settings" ;;
     install) hub_install ;;
     uninstall) uninstall_agent "$HUB_LABEL" ;;
+    use)
+      local a="${1:-}"
+      [ -n "$a" ] || die "usage: proj hub use <alias>"
+      hub_ready "$a" || die "account $a is not set up for the hub. On the Mac mini's screen: proj hub login --account $a (log in, trust the folder, /exit), then proj hub run --account $a once (answer y, Ctrl+C), then proj hub use $a"
+      config_set HUB_ACCOUNT "$a"
+      ! launchctl print "gui/$(id -u)/$HUB_LABEL" >/dev/null 2>&1 || launchctl kickstart -k "gui/$(id -u)/$HUB_LABEL"
+      echo "hub now uses account $a ($(usage_line "$a")). Open the hub from that account's Claude app." ;;
     status)
+      echo "account  $(hub_account)  $(usage_line "$(hub_account)")"
       launchctl print "gui/$(id -u)/$HUB_LABEL" 2>/dev/null | grep -E '^\s*(state|pid|last exit code) =' || echo "hub service not installed"
       [ ! -f "$(hub_dir)/hub.log" ] || { echo "--- hub.log (tail)"; tail -5 "$(hub_dir)/hub.log"; } ;;
-    *) die "usage: proj hub init|login|run|install|uninstall|status" ;;
+    *) die "usage: proj hub init|login|run|install|uninstall|status|use <alias>" ;;
   esac
 }
 
@@ -1078,6 +1095,7 @@ proj — per-project agent containers (docs/proj.md)
   proj usage [--refresh]                      5h / 7d limit usage per account
   proj idle [hours] | install [hours] | uninstall   stop idle containers (default 3h)
   proj hub init|login|run|install|uninstall|status   main agent on the host (Remote Control)
+  proj hub use <alias> | login|run --account <alias>  switch the hub to another account / set one up
   proj imagegen install|uninstall|status|run         image MCP for containers (host Codex login)
   proj plugin source add <owner/repo|URL> | update [marketplace] | ls   plugin marketplaces on the host
   proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE ...] | rm <plugin@marketplace> | ls

@@ -29,14 +29,16 @@
       "Bash(gh pr view*)",
       "Bash(gh pr diff*)",
       "Read(~/workspace/**)",
-      "Read(~/.agent-hub/tasks/**)"
+      "Read(~/.agent-hub/tasks/**)",
+      "Bash(proj hub status*)"
     ],
     "deny": [
       "Read(~/.agent-hub/accounts/**)",
       "Bash(proj account add*)",
       "Bash(docker*)",
       "Bash(echo y*)",
-      "Bash(yes*)"
+      "Bash(yes*)",
+      "Bash(proj hub use*)"
     ],
     "additionalDirectories": ["~/workspace", "~/.agent-hub/tasks"]
   }

@@ -235,4 +235,13 @@ rm -f "$td/transcript.md"; transcript_fresh "$td"
 check "transcript: stub when there is nothing to read" 1 "$(grep -c 'No session records found' "$td/transcript.md")"
 rm -rf "$td"
 
+# proj hub use: only to an account whose host Claude config is logged in; writes HUB_ACCOUNT.
+hh="$(mktemp -d)"; mkdir -p "$hh/.claude-ready"; echo '{"oauthAccount":{}}' > "$hh/.claude-ready/.claude.json"
+check "hub use refuses an account that is not logged in" "not set up" "$( (HOME="$hh"; launchctl() { return 1; }; cmd_hub use nope) 2>&1 | grep -o 'not set up' || true)"
+( HOME="$hh"; launchctl() { return 1; }; cmd_hub use ready ) >/dev/null
+check "hub use writes HUB_ACCOUNT" "HUB_ACCOUNT=ready" "$(grep '^HUB_ACCOUNT=' "$AGENT_HUB_HOME/config")"
+( HOME="$hh"; launchctl() { return 1; }; cmd_hub use ready ) >/dev/null
+check "hub use keeps one HUB_ACCOUNT line" 1 "$(grep -c '^HUB_ACCOUNT=' "$AGENT_HUB_HOME/config")"
+rm -rf "$hh"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
