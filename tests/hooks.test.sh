@@ -74,6 +74,9 @@ m="$T/onmain"; git init -q -b main "$m"; git -C "$m" -c user.name=t -c user.emai
 check "commit on main"          deny  "$(verdict Bash command 'git commit -m x' "$m")"
 check "commit on a branch"      allow "$(verdict Bash command 'git commit -m x' "$r")"
 check "merge task commits main" allow "$(AGENT_HUB_ALLOW_MERGE=1 verdict Bash command 'git commit -m x' "$m")"
+check "git merge on main"       deny  "$(verdict Bash command 'git merge chore/worklog' "$m")"
+check "merge task merges main"  allow "$(AGENT_HUB_ALLOW_MERGE=1 verdict Bash command 'git merge agent/x' "$m")"
+check "git merge-base on main"  allow "$(verdict Bash command 'git merge-base main HEAD' "$m")"
 
 # Secrets in what is about to be committed; the message never shows the value.
 fake="sk-ant-oat01-$(printf 'A%.0s' $(seq 1 40))"

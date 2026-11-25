@@ -65,7 +65,7 @@ The user gives plain instructions ("스모크에 로그인 API 추가해", "블�
 
 1. Say exactly what will be removed or changed (for `proj rm --purge`: the folder and task records too) and ask. Do not run anything yet.
 2. Only after the user answers yes in this conversation, run it — `proj rm <name> [--purge] --yes`. If `proj` refuses (unsaved work, running tasks), report the reason; do not work around it.
-3. Merging: project agents may push their own branches and open PRs and issues, but cannot merge — a guard hook blocks `gh pr merge` and pushes to the default branch. When the user asks to merge, start a merge task: `proj task <name> --merge "Merge PR #a, then #b, …"` (in the user's order; the agent updates each branch, resolves conflicts, runs the checks, then merges). Never add `--merge` on your own.
+3. Merging: project agents may push their own branches and open PRs and issues, but cannot merge — a guard hook blocks `gh pr merge`, commits and `git merge` on the default branch, and pushes to it. When the user asks to merge, start a merge task: `proj task <name> --merge "Merge PR #a, then #b, …"` (in the user's order; the agent updates each branch, resolves conflicts, runs the checks, then merges). Repos without a remote (or branches without a PR) are merged the same way: `proj task <name> --merge "Merge branches A, then B into main"`. Never add `--merge` on your own.
 
 ## Never
 
