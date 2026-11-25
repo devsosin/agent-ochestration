@@ -34,6 +34,7 @@ RUN chmod 755 /usr/local/bin/agent-run /usr/local/lib/agent-hub/hooks/* \
 
 # Updates come from rebuilding the image, not from inside a running container.
 ENV DISABLE_AUTOUPDATER=1 \
+    TZ=Asia/Seoul \
     CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1 \
     CLAUDE_CONFIG_DIR=/home/node/.claude
 

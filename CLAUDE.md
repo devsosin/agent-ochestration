@@ -12,7 +12,7 @@ mac-agent/
 ├── image/                   # Agent image: Dockerfile (targets base, rust) + files copied into it
 │   ├── managed-settings.json  # default managed settings (harness on); bin/proj copies it per project
 │   ├── settings/            # permission + hook profiles: common.json + one team file (dev, marketing), merged per project
-│   ├── hooks/               # guard (.env, merge gate) and worklog hooks, copied to /usr/local/lib/agent-hub/hooks
+│   ├── hooks/               # guard (.env, folder, settings, secrets, merge gate) and worklog hooks → /usr/local/lib/agent-hub/hooks
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
 │   ├── mcp.json             # imagegen MCP at host.docker.internal:7801
 │   ├── profile.sh           # exports tokens from /run/secrets for shells

@@ -120,20 +120,38 @@
 
 | 프로필 | 내용 |
 |---|---|
-| 공통 | `.env` 계열·`*.pem`·`*.key` Read/Edit deny, `sudo` deny. 가드 훅, 작업 기록 훅 |
+| 공통 | `.env` 계열·`*.pem`·`*.key` Read/Edit deny, `sudo` deny. 가드 훅, 작업 기록 훅, 세션 시작 때 최근 기록 |
 | `dev` (기본) | 추가 deny 없음: issue, 브랜치 push, `gh pr create` 가능. 병합은 `--merge` 작업에서만 |
 | `marketing` | `git push`, `git remote add/set-url`, 데이터를 바꾸는 `curl`(`-X POST` 등, `-d`, `-F`)·`wget` deny |
 
 | 훅 (`image/hooks/`, 이미지 `/usr/local/lib/agent-hub/hooks/`) | 동작 |
 |---|---|
-| `guard` (PreToolUse) | 경로·명령에 `.env` 이름이 있으면 거부, `.env.example`만 허용. `gh pr merge`, `pulls/<n>/merge` API, 기본 브랜치(main·master·origin HEAD)로의 push·`--all`은 `AGENT_HUB_ALLOW_MERGE=1`(`proj task --merge`)일 때만 |
-| `worklog` (Stop) | 최근 1시간 안에 바뀐 파일이 있는데 `log/YYYY-MM.md`(저장소 루트, 아니면 작업 폴더)가 그 뒤에 안 바뀌었으면 한 번 막고 한 줄을 요청: `- YYYY-MM-DD HH:MM <task id\|shell> <branch> — 한 일` |
+| `guard` (PreToolUse) | ① 경로·명령에 `.env` 이름이 있으면 거부, `.env.example`만 허용 ② 파일 도구(Write·Edit) 쓰기는 프로젝트 폴더, `/tmp`, Claude 프로젝트 메모리만 ③ `.claude/settings.json`·`settings.local.json` 쓰기 거부(파일 도구와 셸 쓰기 모두) ④ `git commit` 전 커밋될 내용에서 토큰(`sk-ant-`, `ghp_`, `github_pat_`, AWS·Slack·Google 키)·개인키 블록을 찾으면 거부(값은 안 보여 줌) ⑤ `gh pr merge`, `pulls/<n>/merge` API, 기본 브랜치(main·master·origin HEAD)에서의 commit·그쪽으로의 push·`--all`은 `AGENT_HUB_ALLOW_MERGE=1`(`proj task --merge`)일 때만 |
+| `worklog` (Stop) | 최근 1시간 안에 바뀐 파일이 있는데 `log/YYYY-MM.md`가 그 뒤에 안 바뀌었으면 한 번 막고 표에 한 행을 요청 (아래 "작업 기록") |
+| `worklog recent` (SessionStart) | 가장 최근 `log/YYYY-MM.md`의 마지막 5행을 맥락으로 넣음 |
 
 - 작업은 `bypassPermissions`로 돌므로 allow·ask 규칙은 효과가 없다. 막는 것은 deny와 훅뿐.
-- 훅은 문자열 검사라 셸로 우회할 수 있다. 병합을 확실히 막으려면 GitHub 저장소에서 main 브랜치 보호를 켠다.
+- 훅은 문자열 검사라 셸로 우회할 수 있다. 병합을 확실히 막으려면 GitHub 저장소에서 main 브랜치 보호를 켠다. 폴더 경계(②)도 파일 도구만 막는다.
+- 훅이 쓰는 값은 managed settings `env`에 `bin/proj`가 넣는다: `AGENT_HUB_PROFILE`(기록 열), `AGENT_HUB_PROJECT_DIR`(폴더 경계, 워크스페이스 판단). `proj shell` 세션에도 적용된다.
+- 반영하지 않은 것: `rm -rf` 공통 deny(개발 작업이 자주 씀, git으로 복구), 게시·광고 API 호스트 차단(문자열 검사는 우회됨. 컨테이너에 게시 토큰을 주지 않는 것과 네트워크 송신 제한으로 다룸).
 - 저장소 고유 규칙(예: 마케팅 SSOT 보호, 린트 훅)은 그 저장소의 `.claude/settings.json`에 커밋한다. managed 규칙이 우선하고, 에이전트가 고칠 수 있는 파일이라 공통 규칙은 넣지 않는다.
-- 적용: `proj build`(훅 스크립트) 후 기존 프로젝트는 다음 작업부터 `dev`. 마케팅 프로젝트는 `proj profile <name> marketing`.
-- 시각은 컨테이너 시간대(UTC) 기준.
+- 적용: `proj build` 후 프로젝트마다 `proj up <name>`(새 이미지로 컨테이너를 다시 만듦. 훅 스크립트와 시간대가 이미지에 있음). 기존 프로젝트는 `dev`, 마케팅 프로젝트는 `proj profile <name> marketing`.
+- 컨테이너 시간대는 KST(`TZ=Asia/Seoul`, 이미지). 작업 기록·커밋 시각 모두.
+
+### 작업 기록 (`log/YYYY-MM.md`)
+
+도구 사용 내역이 아니라 사람이 읽는 작업 내역. 에이전트가 Markdown 표에 한 행씩 쓰고, 파일이 없으면 머리글부터 만든다. 작업내용은 한국어 한 줄.
+
+| 프로필 | 열 |
+|---|---|
+| `dev` | `일시 \| 이슈·PR \| 작업내용 \| 브랜치` |
+| `marketing` | `시각 \| 에이전트 \| 내용 \| 참조` (참조: 항목 ID·주요 파일) |
+
+- 워크스페이스(프로젝트 루트가 git 저장소가 아님): 루트에 기록 하나, 첫 열 뒤에 `대상`(저장소 폴더) 열이 붙는다.
+- 단일 저장소: 저장소 루트(`--worktree` 작업은 그 worktree, 브랜치와 함께 커밋).
+- 예 (마케팅): `| 2026-11-25 02:46 | cmo | ceo 신규 C-140~C-144, C-131 갱신. 사실·주장·결정 반영은 쓰기 승인 대기라 대기 파일에 정리 | ceo/items, memory/pending-ssot-edits.md |`
+- 저장소에 이 기록을 검사하는 스크립트가 있으면 이 형식에 맞춘다. 저장소 자체의 같은 Stop 훅·SessionStart 최근 로그 훅은 빼서 두 번 뜨지 않게 한다.
+- 저장소 `.claude/settings.json`의 `ask` 규칙은 작업(`claude -p`, 승인 창 없음)에서 거부와 같다. 에이전트가 고쳐야 하는 경로는 `allow`, 사람만 고칠 것(`.claude/settings.json`, 훅 파일)만 `ask`로 둔다. `allow` 규칙은 작업이 `bypassPermissions`라 없어도 된다.
 
 ## 상태
 

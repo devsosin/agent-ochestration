@@ -361,11 +361,14 @@ cmd_alias() { # proj alias <name> <alias, e.g. 스모크>
 settings_file() { printf '%s/projects/%s.managed-settings.json' "$HUB" "$1"; }
 
 ensure_settings() { # the image's managed settings (harness on) + env, with the project's profile rules kept current
-  local f p tmp; f="$(settings_file "$1")"
+  local f n d p tmp; f="$(settings_file "$1")"; n="$(project_profile "$1")"
+  d="$(project_var "$1" PROJECT_DIR 2>/dev/null || true)"
   [ -f "$f" ] || jq '. + {env: {}}' "$REPO_DIR/image/managed-settings.json" > "$f"
-  p="$(profile_json "$(project_profile "$1")")" || die "bad settings profile for $1 (proj profile $1 <profile>)"
-  [ "$p" != "$(jq -c '{permissions, hooks}' "$f")" ] || return 0
-  tmp="$(jq --argjson p "$p" '.permissions = $p.permissions | .hooks = $p.hooks' "$f")"
+  p="$(profile_json "$n")" || die "bad settings profile for $1 (proj profile $1 <profile>)"
+  # For the hooks (image/hooks), also in proj shell sessions: work log columns and the project folder.
+  p="$(printf '%s' "$p" | jq -c --arg n "$n" --arg d "$d" '. + {env: {AGENT_HUB_PROFILE: $n, AGENT_HUB_PROJECT_DIR: $d}}')"
+  [ "$p" != "$(jq -c '{permissions, hooks, env: {AGENT_HUB_PROFILE: .env.AGENT_HUB_PROFILE, AGENT_HUB_PROJECT_DIR: .env.AGENT_HUB_PROJECT_DIR}}' "$f")" ] || return 0
+  tmp="$(jq --argjson p "$p" '.permissions = $p.permissions | .hooks = $p.hooks | .env += $p.env' "$f")"
   printf '%s\n' "$tmp" > "$f"   # in place, see write_settings
 }
 
@@ -482,8 +485,9 @@ plugin_rm() { # plugin_rm <name> <plugin@marketplace>: drops the marketplace too
 
 plugin_ls() {
   ensure_settings "$1"
-  jq -r --arg n "$1" '"\($n): \(.enabledPlugins | to_entries | map(select(.value) | .key) | join(", "))"
-    + (if (.env // {}) == {} then "" else "  env: \(.env | to_entries | map("\(.key)=\(.value)") | join(" "))" end)' \
+  jq -r --arg n "$1" '(.env // {} | del(.AGENT_HUB_PROFILE, .AGENT_HUB_PROJECT_DIR)) as $e   # set by bin/proj, not plugin options
+    | "\($n): \(.enabledPlugins | to_entries | map(select(.value) | .key) | join(", "))"
+    + (if $e == {} then "" else "  env: \($e | to_entries | map("\(.key)=\(.value)") | join(" "))" end)' \
     "$(settings_file "$1")"
 }
 
@@ -806,7 +810,7 @@ launch() { # launch <task dir> [session id to resume]
   echo "ACCOUNT=$(project_var "$project" ACCOUNT)" >> "$d/meta"   # usage is tracked per account
   ensure_up "$project"; ensure_settings "$project"   # profile rules from the repo, for this run
   # Detached inside the container so the run outlives this shell; the sh pid marks it running.
-  docker exec -d -e AGENT_HUB_TASK="$id" ${merge:+-e AGENT_HUB_ALLOW_MERGE=1} "$(container "$project")" sh -c '
+  docker exec -d ${merge:+-e AGENT_HUB_ALLOW_MERGE=1} "$(container "$project")" sh -c '
     t="$1"; w="$2"; s="$3"; shift 3
     echo $$ > "$t/pid"
     cd "$w" || { echo 127 > "$t/exit"; exit 0; }

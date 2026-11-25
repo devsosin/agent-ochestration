@@ -245,7 +245,7 @@ check "hub use keeps one HUB_ACCOUNT line" 1 "$(grep -c '^HUB_ACCOUNT=' "$AGENT_
 rm -rf "$hh"
 
 # Settings profiles: common + team rules go into the project's managed settings; plugins and env stay.
-printf 'PROJECT_NAME=prof\n' > "$(env_file prof)"
+printf 'PROJECT_NAME=prof\nPROJECT_DIR=/w/prof\n' > "$(env_file prof)"
 ensure_settings prof
 s="$(settings_file prof)"
 check "profile: dev by default" dev "$(project_profile prof)"
@@ -263,5 +263,8 @@ check "profile: env kept on switch" 1 "$(jq -r .env.FOO "$s")"
 check "profile: hooks not doubled" 1 "$(jq '.hooks.PreToolUse | length' "$s")"
 check "profile: unknown profile refused" "unknown profile" "$( (cmd_profile prof sales) 2>&1 | grep -o 'unknown profile' || true)"
 check "profile: show" "prof: marketing" "$(cmd_profile prof)"
+check "profile: name in env for the work log" marketing "$(jq -r .env.AGENT_HUB_PROFILE "$s")"
+check "profile: project dir in env for the guard" /w/prof "$(jq -r .env.AGENT_HUB_PROJECT_DIR "$s")"
+check "profile: not listed as a plugin option" "prof: harness@devsosin-harness  env: FOO=1" "$(plugin_ls prof)"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
