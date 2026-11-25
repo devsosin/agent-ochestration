@@ -4,7 +4,7 @@
 #  2. File tools write only inside the project (AGENT_HUB_PROJECT_DIR), /tmp and Claude's project memory.
 #  3. .claude/settings.json and settings.local.json stay with the user (repo permission rules and hooks live there).
 #  4. git commit: no token or private key in what is being committed.
-#  5. Merge gate: no `gh pr merge`, no push to and no commit on the default branch, unless the task was started with
+#  5. Merge gate: no `gh pr merge`, no push to the default branch and no commit or `git merge` on it, unless the task was started with
 #     `proj task --merge` (AGENT_HUB_ALLOW_MERGE=1 in claude's environment, which the agent's shell cannot change).
 # shortcut: string matching on commands, so a determined shell can get around it; GitHub branch protection is the hard gate.
 in="$(cat)"
@@ -64,7 +64,9 @@ printf '%s\n' "$text" | grep -qE 'pulls/[0-9]+/merge' && block "$why"
 
 default="$(git -C "${cwd:-.}" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
 protected="main master ${default:-main}"
-if [ -n "$commits" ]; then
+# git merge while on the default branch merges into it (repos without a remote merge this way); merging main into
+# one's own branch stays allowed.
+if [ -n "$commits" ] || printf '%s\n' "$text" | grep -qE '(^|[^[:alnum:]_-])git[[:space:]]+merge([[:space:]]|$)'; then
   cur="$(git -C "${cwd:-.}" symbolic-ref -q --short HEAD 2>/dev/null || true)"
   for b in $protected; do [ "$cur" != "$b" ] || block "$why"; done
 fi

@@ -801,9 +801,9 @@ launch() { # launch <task dir> [session id to resume]
   fi
   merge="$(meta "$d" MERGE)"
   if [ -n "$merge" ]; then
-    sys="$sys This is a merge task: the user asked to merge. You may switch to the pull requests' branches. Merge them one at a time in the order the task gives: bring each up to date with its base branch, resolve conflicts, run the project's checks, push, then merge with gh pr merge. Stop and report if a conflict needs a product decision."
+    sys="$sys This is a merge task: the user asked to merge. You may switch to the pull requests' branches. Merge them one at a time in the order the task gives: bring each up to date with its base branch, resolve conflicts, run the project's checks, push, then merge with gh pr merge (a repo without a remote, or branches without a pull request: git merge into the default branch locally). Stop and report if a conflict needs a product decision."
   else
-    sys="$sys Do not merge pull requests or push to the default branch: merging happens only in merge tasks the user asks for."
+    sys="$sys Do not merge pull requests, git merge into the default branch, or push to it: merging happens only in merge tasks the user asks for."
   fi
   sys="$sys Do not push or open pull requests unless the task asks. End with a short report: what changed, how you verified it, open questions. In the report, give file paths relative to the working directory, never absolute."
   rm -f "$d/exit" "$d/pid"
