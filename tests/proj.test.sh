@@ -244,4 +244,24 @@ check "hub use writes HUB_ACCOUNT" "HUB_ACCOUNT=ready" "$(grep '^HUB_ACCOUNT=' "
 check "hub use keeps one HUB_ACCOUNT line" 1 "$(grep -c '^HUB_ACCOUNT=' "$AGENT_HUB_HOME/config")"
 rm -rf "$hh"
 
+# Settings profiles: common + team rules go into the project's managed settings; plugins and env stay.
+printf 'PROJECT_NAME=prof\n' > "$(env_file prof)"
+ensure_settings prof
+s="$(settings_file prof)"
+check "profile: dev by default" dev "$(project_profile prof)"
+check "profile: common env deny" yes "$(jq -e '.permissions.deny | index("Read(//**/.env)")' "$s" >/dev/null && echo yes || echo no)"
+check "profile: guard hook" yes "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$s" | grep -q hooks/guard && echo yes || echo no)"
+check "profile: work log hook" yes "$(jq -r '.hooks.Stop[0].hooks[0].command' "$s" | grep -q hooks/worklog && echo yes || echo no)"
+check "profile: dev does not deny push" no "$(jq -e '.permissions.deny | index("Bash(git push*)")' "$s" >/dev/null && echo yes || echo no)"
+check "profile: harness plugin kept" true "$(jq -r '.enabledPlugins["harness@devsosin-harness"]' "$s")"
+write_settings prof '.env.FOO = "1"'
+cmd_profile prof marketing >/dev/null
+check "profile: switched" marketing "$(project_var prof PROFILE)"
+check "profile: marketing denies push" yes "$(jq -e '.permissions.deny | index("Bash(git push*)")' "$s" >/dev/null && echo yes || echo no)"
+check "profile: common deny kept" yes "$(jq -e '.permissions.deny | index("Read(//**/.env)")' "$s" >/dev/null && echo yes || echo no)"
+check "profile: env kept on switch" 1 "$(jq -r .env.FOO "$s")"
+check "profile: hooks not doubled" 1 "$(jq '.hooks.PreToolUse | length' "$s")"
+check "profile: unknown profile refused" "unknown profile" "$( (cmd_profile prof sales) 2>&1 | grep -o 'unknown profile' || true)"
+check "profile: show" "prof: marketing" "$(cmd_profile prof)"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(git push*)", "Bash(git remote add*)", "Bash(git remote set-url*)",
+      "Bash(curl * -X POST*)", "Bash(curl * -X PUT*)", "Bash(curl * -X PATCH*)", "Bash(curl * -X DELETE*)",
+      "Bash(curl * --request *)", "Bash(curl * -d *)", "Bash(curl * --data*)", "Bash(curl * -F *)", "Bash(curl * --form*)",
+      "Bash(wget --post*)", "Bash(wget --method*)"
+    ]
+  }
+}

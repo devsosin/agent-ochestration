@@ -1,0 +1,18 @@
+#!/bin/sh
+# Stop hook for project agents (image/settings/common.json): the work log. When files changed in the last hour and
+# log/YYYY-MM.md (repo root, else the working folder) did not change after them, block the stop once and ask the
+# agent for one line. stop_hook_active ends the loop, so it asks at most once per stop.
+in="$(cat)"
+[ "$(printf '%s' "$in" | jq -r '.stop_hook_active // false' 2>/dev/null)" = false ] || exit 0
+cwd="$(printf '%s' "$in" | jq -r '.cwd // empty')"
+[ -d "$cwd" ] || exit 0
+top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || echo "$cwd")"
+log="log/$(date +%Y-%m).md"
+newer=""; [ -f "$top/$log" ] && newer="-newer $top/$log"
+changed="$(find "$top" \( -name .git -o -name node_modules -o -name target -o -name .worktrees -o -path "$top/.claude/worktrees" \
+  -o -path "$top/log" \) -prune -o -type f -mmin -60 $newer -print 2>/dev/null | head -1)"
+[ -n "$changed" ] || exit 0
+branch="$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null || echo -)"
+line="- $(date '+%Y-%m-%d %H:%M') ${AGENT_HUB_TASK:-shell} $branch — <what you did, one line>"
+jq -nc --arg r "Before you finish, append one line to $log in $top (create the file if missing): $line
+If you commit, commit the log line with your work." '{decision: "block", reason: $r}'
