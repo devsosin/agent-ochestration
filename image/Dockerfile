@@ -3,6 +3,7 @@
 
 FROM node:22-bookworm-slim AS base
 ARG CLAUDE_CODE_VERSION=latest
+ARG PLAYWRIGHT_MCP_VERSION=latest
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git jq ripgrep less procps openssh-client \
@@ -18,6 +19,17 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
+
+# Frontend work: Playwright MCP (image/mcp.json) and its Chromium with the system libraries, which need root.
+# Chromium, not Chrome: Chrome has no linux arm64 build. A repo on another Playwright version downloads its own
+# browser into the same node-owned folder (npx playwright install chromium); the libraries are already here.
+# fonts-noto-cjk: Korean text renders as boxes in screenshots without it.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN apt-get update && apt-get install -y --no-install-recommends fonts-noto-cjk \
+ && npm install -g @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} \
+ && node "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" install --with-deps chromium \
+ && chown -R node:node /ms-playwright \
+ && npm cache clean --force && rm -rf /var/lib/apt/lists/*
 
 # Fallback only: compose mounts each project's own file here (proj plugin), which bin/proj starts from this one.
 COPY managed-settings.json /etc/claude-code/managed-settings.json
