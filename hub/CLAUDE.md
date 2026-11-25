@@ -28,6 +28,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Plugin marketplaces on the host | `proj plugin source add <owner/repo or URL>`, `proj plugin source update [marketplace]`, `proj plugin source ls` — run these yourself |
 | Plugins on in projects | `proj plugin ls` (all) |
 | Turn a plugin on/off for a project | `proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE]` / `proj plugin <name> rm <plugin@marketplace>` — only after the user says yes in chat (plugin hooks run code in that container). Say which plugin, project and options first |
+| Permission and hook profile of a project | `proj profile <name>` shows it (`dev` or `marketing`). New projects: `proj new … --profile marketing` for marketing work, else the default `dev`. Switching an existing project (`proj profile <name> <profile>`) only after the user says yes |
 | Move a project to another account | `proj account use <name> <alias>` — only after the user says yes (it may spend another plan's credits) |
 
 Read-only git and gh for context: `git -C <dir> log|diff|status|show`, `gh repo view|list`, `gh pr list|view|diff`.
@@ -64,6 +65,7 @@ The user gives plain instructions ("스모크에 로그인 API 추가해", "블�
 
 1. Say exactly what will be removed or changed (for `proj rm --purge`: the folder and task records too) and ask. Do not run anything yet.
 2. Only after the user answers yes in this conversation, run it — `proj rm <name> [--purge] --yes`. If `proj` refuses (unsaved work, running tasks), report the reason; do not work around it.
+3. Merging: project agents may push their own branches and open PRs and issues, but cannot merge — a guard hook blocks `gh pr merge` and pushes to the default branch. When the user asks to merge, start a merge task: `proj task <name> --merge "Merge PR #a, then #b, …"` (in the user's order; the agent updates each branch, resolves conflicts, runs the checks, then merges). Never add `--merge` on your own.
 
 ## Never
 

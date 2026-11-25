@@ -36,6 +36,7 @@ Mac mini
 | OpenAI(Codex) 로그인 | 넣지 않음 | 호스트 imagegen MCP만 사용. 컨테이너는 이미지 URL만 받음 |
 | 플러그인 코드·managed settings | 읽기 전용 마운트 | 플러그인 hook은 컨테이너에서 코드를 실행하므로 코드는 호스트에서만 바뀜(`proj plugin source add`·`update`). 켜는 플러그인과 옵션도 호스트 파일이라 에이전트가 바꿀 수 없음. 마켓플레이스 폴더는 모든 프로젝트에 보이지만 켜진 것만 로드됨 |
 | 권한 모드 | `bypassPermissions` (non-root) | 컨테이너가 경계. 네트워크 송신 제한은 아직 없음 (TBD) |
+| 권한·훅 프로필 | managed settings(읽기 전용)에 공통 + 팀(`dev`·`marketing`) deny와 훅 | `.env` 차단(`.env.example`만), 병합은 `--merge` 작업만. 훅은 문자열 검사라 GitHub 브랜치 보호가 최종 차단 ([proj.md](proj.md) "권한·훅 프로필") |
 
 ### Docker 프록시 규칙 (`dockerproxy/server.py`)
 
@@ -82,6 +83,7 @@ Mac mini
 | 2026-11-19 | 플러그인은 호스트 `~/.agent-hub/plugins/`에 git clone해 모든 컨테이너에 읽기 전용으로 올리고, 프로젝트별 managed settings로 켜고 끈다. 옵션은 settings `env`, harness는 기본 켬(`rm`으로 끌 수 있음). 메인 에이전트는 `proj plugin source add`·`update`·`ls`를 바로 실행, 프로젝트별 `add`·`rm`은 사용자 승인 후 (#6) | 컨테이너 안에서 플러그인을 설치할 수 없다는 프로젝트 에이전트 보고. managed settings는 신뢰 확인이 없어 `claude -p`에서도 동작, 버전은 호스트에서 고정 (사용자 결정) |
 | 2026-11-19 | 이어서 작업: 같은 세션은 `proj reply`, 새 세션은 `proj task --from <task>`(그 작업 브랜치에서 새 브랜치). 세션이 없을 때 reply가 자동으로 새 세션을 만들지 않음. 예전 볼륨 세션은 사용자가 1회 수동 복사 (#11) | #8 전환 때 컨테이너 재생성으로 볼륨 세션이 가려져 reply가 실패한 사례. 다시 생기지 않는 1회성 원인 (사용자 결정) |
 | 2026-11-23 | 메인 에이전트 계정 전환은 `proj hub use <alias>`(설정 변경 + 서비스 재시작), 사용자만 실행. 채팅 기록은 옮기지 않고 작업 상태(`proj`)로 이어 감. hub는 자기 계정 80% 이상이면 안내 (#14). 주제별 채팅방은 Remote Control 서버 모드로 이미 가능 (#15 종료) | 한도에 걸리면 hub 대화도 막힘 (사용자 결정) |
+| 2026-11-25 | 권한·훅을 공통 / 개발팀(`dev`) / 마케팅팀(`marketing`) 프로필로 나누고 `proj new --profile`로 적용. 공통: `.env` 읽기·쓰기 금지(`.env.example`만), 작업 기록은 프로젝트 `log/YYYY-MM.md`에 한 줄(도구 사용 내역은 기록 안 함). 개발팀: issue, push, PR 생성 허용, 병합은 사용자가 요청할 때 `proj task --merge`로 순서대로 (#17) | 사용자 결정 |
 
 ## 단계
 

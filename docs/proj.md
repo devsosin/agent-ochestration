@@ -8,7 +8,7 @@
 |---|---|
 | `proj build` | 이미지 `agent-hub:base`, `agent-hub:rust`, `agent-hub:dockerproxy` 빌드 (Claude Code 업데이트도 이것으로) |
 | `proj account add <alias>` / `ls` | 계정 토큰 저장 / 목록 ([accounts.md](accounts.md)) |
-| `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g]` | `$WORKSPACE_ROOT/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 `Cargo.toml`이 있을 때 rust |
+| `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g] [--profile dev\|marketing]` | `$WORKSPACE_ROOT/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 `Cargo.toml`이 있을 때 rust. 프로필 기본 `dev` (아래 "권한·훅 프로필") |
 | `proj new <name> --create [--public]` | 위와 같이 새로 만들고, 호스트 `gh`로 GitHub 저장소(기본 비공개)를 만들어 `origin`으로 push |
 | `proj new <name> --workspace` | 여러 저장소를 담는 빈 워크스페이스 폴더 (루트는 git 저장소가 아님) |
 | `proj add <ws> <folder> [--repo URL\|owner/name \| --create [--public]]` | 워크스페이스에 저장소 추가: clone 또는 새로 만들기(+GitHub). Rust 저장소면 이미지를 rust로 전환 |
@@ -19,12 +19,13 @@
 | `proj hub init` / `login` / `run` / `install` / `uninstall` / `status` | 메인 에이전트 관리 (아래 "메인 에이전트") |
 | `proj imagegen install` / `uninstall` / `status` | 이미지 생성 MCP 서버를 launchd로 등록·해제·확인 (아래 "이미지 생성") |
 | `proj plugin source add <owner/repo\|URL>` / `update [marketplace]` / `ls` | 플러그인 마켓플레이스 저장소를 `~/.agent-hub/plugins/<marketplace.json의 name>/`에 clone / `git pull --ff-only` / 목록 (아래 "플러그인") |
+| `proj profile <name> [dev\|marketing]` | 권한·훅 프로필 보기 / 바꾸기 (다음 작업부터) |
 | `proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE …]` / `rm <plugin@marketplace>` / `ls` | 그 프로젝트에서 플러그인 켜기(옵션은 `env`, `KEY=`는 그 키 삭제) / 끄기 / 목록. `proj plugin ls`는 모든 프로젝트 |
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지. 에이전트가 띄운 컨테이너는 멈추기만) / 컨테이너 셸 |
 | `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨, 에이전트가 띄운 컨테이너·네트워크·볼륨(라벨 `agent-hub.project=<name>`, DB 데이터 포함) 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록·대화 기록(`sessions/<name>`)까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
-| `proj task <name> [--repo <folder>] [--worktree] [--from <task\|branch>] <지시…\|->` | 체크아웃에 기본 브랜치(`--from`이면 그 작업의 브랜치)에서 새 브랜치 `agent/<id>`를 만들고 `claude -p` 백그라운드 실행. `--worktree`는 `.worktrees/<id>`에서 실행(병렬용). 워크스페이스는 `--repo`로 저장소를 고르고, 없으면 루트에서 실행. `-`는 표준입력에서 지시를 읽음. `--here`는 예전 옵션(무시) |
+| `proj task <name> [--repo <folder>] [--worktree] [--from <task\|branch>] [--merge] <지시…\|->` | 체크아웃에 기본 브랜치(`--from`이면 그 작업의 브랜치)에서 새 브랜치 `agent/<id>`를 만들고 `claude -p` 백그라운드 실행. `--worktree`는 `.worktrees/<id>`에서 실행(병렬용). 워크스페이스는 `--repo`로 저장소를 고르고, 없으면 루트에서 실행. `-`는 표준입력에서 지시를 읽음. `--merge`는 사용자가 병합을 요청한 작업(PR 병합 허용). `--here`는 예전 옵션(무시) |
 | `proj reply <task> <지시…\|->` | 같은 세션을 이어서 실행 (`--resume`). 체크아웃이 다른 브랜치로 옮겨 갔으면 변경이 없을 때 작업 브랜치로 다시 전환. 세션 파일이나 작업 폴더가 없으면 실행하지 않고 `--from`을 안내 |
 | `proj status [task\|name]` | 작업 목록(삭제된 프로젝트 제외) 또는 한 작업의 상태·비용·결과 보고. 끝난 작업의 `transcript.md`가 없거나 종료보다 오래됐으면 이때 다시 만듦 |
 | `proj wait <task> [초]` | 작업이 끝날 때까지 기다렸다가 `status` 출력 (기본 1800초, 넘으면 종료 코드 3). 메인 에이전트는 이것으로 기다림 |
@@ -112,6 +113,27 @@
 | 반영 | 다음 `claude -p` 작업부터, 컨테이너 재시작 없음 (파일을 같은 inode에 덮어써 실행 중 컨테이너에도 바로 보임. OrbStack에서 확인). 처음 쓸 때 `CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1`로 Claude 설정 볼륨에 설치, 신뢰 확인 없음 |
 | 갱신 | `proj plugin source update [marketplace]` — 컨테이너는 플러그인 코드를 바꿀 수 없음 |
 | 준비 | 이 기능 이전에 만든 프로젝트는 `proj up <name>` 한 번 (새 마운트 추가) |
+
+## 권한·훅 프로필
+
+프로젝트 managed settings(`~/.agent-hub/projects/<name>.managed-settings.json`, 읽기 전용 마운트)에 `image/settings/common.json` + 팀 프로필을 합쳐 넣는다. deny 목록과 훅은 이어 붙이고, 플러그인·`env`는 그대로 둔다. `proj up`·작업 시작 때 저장소 파일로 다시 맞추므로 `git pull`만으로 반영된다.
+
+| 프로필 | 내용 |
+|---|---|
+| 공통 | `.env` 계열·`*.pem`·`*.key` Read/Edit deny, `sudo` deny. 가드 훅, 작업 기록 훅 |
+| `dev` (기본) | 추가 deny 없음: issue, 브랜치 push, `gh pr create` 가능. 병합은 `--merge` 작업에서만 |
+| `marketing` | `git push`, `git remote add/set-url`, 데이터를 바꾸는 `curl`(`-X POST` 등, `-d`, `-F`)·`wget` deny |
+
+| 훅 (`image/hooks/`, 이미지 `/usr/local/lib/agent-hub/hooks/`) | 동작 |
+|---|---|
+| `guard` (PreToolUse) | 경로·명령에 `.env` 이름이 있으면 거부, `.env.example`만 허용. `gh pr merge`, `pulls/<n>/merge` API, 기본 브랜치(main·master·origin HEAD)로의 push·`--all`은 `AGENT_HUB_ALLOW_MERGE=1`(`proj task --merge`)일 때만 |
+| `worklog` (Stop) | 최근 1시간 안에 바뀐 파일이 있는데 `log/YYYY-MM.md`(저장소 루트, 아니면 작업 폴더)가 그 뒤에 안 바뀌었으면 한 번 막고 한 줄을 요청: `- YYYY-MM-DD HH:MM <task id\|shell> <branch> — 한 일` |
+
+- 작업은 `bypassPermissions`로 돌므로 allow·ask 규칙은 효과가 없다. 막는 것은 deny와 훅뿐.
+- 훅은 문자열 검사라 셸로 우회할 수 있다. 병합을 확실히 막으려면 GitHub 저장소에서 main 브랜치 보호를 켠다.
+- 저장소 고유 규칙(예: 마케팅 SSOT 보호, 린트 훅)은 그 저장소의 `.claude/settings.json`에 커밋한다. managed 규칙이 우선하고, 에이전트가 고칠 수 있는 파일이라 공통 규칙은 넣지 않는다.
+- 적용: `proj build`(훅 스크립트) 후 기존 프로젝트는 다음 작업부터 `dev`. 마케팅 프로젝트는 `proj profile <name> marketing`.
+- 시각은 컨테이너 시간대(UTC) 기준.
 
 ## 상태
 

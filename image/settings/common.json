@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(//**/.env)", "Read(//**/.env.local)", "Read(//**/.env.development)", "Read(//**/.env.production)",
+      "Read(//**/.env.test)", "Read(//**/.envrc)", "Read(//**/*.pem)", "Read(//**/*.key)",
+      "Edit(//**/.env)", "Edit(//**/.env.local)", "Edit(//**/.env.development)", "Edit(//**/.env.production)",
+      "Edit(//**/.env.test)", "Edit(//**/.envrc)", "Edit(//**/*.pem)", "Edit(//**/*.key)",
+      "Bash(sudo *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|MultiEdit|Write|NotebookEdit|Grep|Glob",
+        "hooks": [{ "type": "command", "command": "/usr/local/lib/agent-hub/hooks/guard", "timeout": 10 }]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [{ "type": "command", "command": "/usr/local/lib/agent-hub/hooks/worklog", "timeout": 10 }]
+      }
+    ]
+  }
+}

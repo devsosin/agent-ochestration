@@ -11,6 +11,8 @@ mac-agent/
 ├── bin/proj                 # CLI: projects, accounts, tasks (bash 3.2-compatible)
 ├── image/                   # Agent image: Dockerfile (targets base, rust) + files copied into it
 │   ├── managed-settings.json  # default managed settings (harness on); bin/proj copies it per project
+│   ├── settings/            # permission + hook profiles: common.json + one team file (dev, marketing), merged per project
+│   ├── hooks/               # guard (.env, merge gate) and worklog hooks, copied to /usr/local/lib/agent-hub/hooks
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
 │   ├── mcp.json             # imagegen MCP at host.docker.internal:7801
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
@@ -21,6 +23,7 @@ mac-agent/
 ├── hub/                     # main agent: CLAUDE.md (its operating guide, linked into ~/.agent-hub/hub) + settings.json (permissions)
 ├── tests/proj.test.sh       # unit checks for bin/proj helpers
 ├── tests/imagegen.test.sh   # imagegen server against a fake codex
+├── tests/hooks.test.sh      # agent hooks against fake hook input
 ├── tests/dockerproxy_test.py  # proxy rules against a fake daemon
 └── docs/                    # Korean, compact: architecture, accounts, proj, setup-macmini
 ```
@@ -32,7 +35,7 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/config` | optional overrides: `WORKSPACE_ROOT`, `HARNESS_DIR`, `DEFAULT_ACCOUNT`, `MAX_TASKS` |
 | `~/.agent-hub/accounts/<alias>/` | `claude.token`, `gh.token`, `git.env` — secrets, mode 700/600 |
 | `~/.agent-hub/projects/<name>.env` | compose variables for one project |
-| `~/.agent-hub/projects/<name>.managed-settings.json` | that project's plugins + `env` (`proj plugin`), mounted read-only at `/etc/claude-code/managed-settings.json` |
+| `~/.agent-hub/projects/<name>.managed-settings.json` | that project's plugins + `env` (`proj plugin`) + profile rules (`proj profile`), mounted read-only at `/etc/claude-code/managed-settings.json` |
 | `~/.agent-hub/plugins/<marketplace>/` | plugin marketplace clones (`proj plugin source add`), mounted read-only at `/opt/plugins` |
 | `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container), `transcript.md` (built on the host, `proj transcript`) |
 | `~/.agent-hub/sessions/<name>/` | Claude Code session files of that project's container (bind mount of `/home/node/.claude/projects`), source of `transcript.md` |
@@ -67,6 +70,7 @@ Runtime state lives outside the repo (never commit it):
 ```bash
 bash tests/proj.test.sh                 # helper unit checks
 bash tests/imagegen.test.sh             # imagegen MCP server (fake codex)
+bash tests/hooks.test.sh                # agent hooks (guard, worklog)
 python3 tests/dockerproxy_test.py       # Docker proxy rules (fake daemon)
 bin/proj build                          # builds agent-hub:base, agent-hub:rust, agent-hub:dockerproxy
 ```

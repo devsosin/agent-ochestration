@@ -1,0 +1,50 @@
+#!/bin/sh
+# PreToolUse hook for project agents (image/settings/common.json). Exit 2 blocks the call and shows the message to the agent.
+#  1. .env files: no access except .env.example (deny rules cannot carve out an exception, so it is done here).
+#  2. Merge gate: no `gh pr merge` and no push to the default branch, unless the task was started with
+#     `proj task --merge` (AGENT_HUB_ALLOW_MERGE=1 in claude's environment, which the agent's shell cannot change).
+# shortcut: string matching on commands, so a determined shell can get around it; GitHub branch protection is the hard gate.
+in="$(cat)"
+tool="$(printf '%s' "$in" | jq -r '.tool_name // empty' 2>/dev/null)" || exit 0
+[ -n "$tool" ] || exit 0
+cwd="$(printf '%s' "$in" | jq -r '.cwd // empty')"
+if [ "$tool" = Bash ]; then
+  text="$(printf '%s' "$in" | jq -r '.tool_input.command // empty')"
+else
+  text="$(printf '%s' "$in" | jq -r '[.tool_input | (.file_path, .path, .notebook_path, .pattern, .glob) | strings] | join(" ")')"
+fi
+block() { echo "agent-hub guard: $*" >&2; exit 2; }
+
+# A .env name starts after a path separator, space, quote, redirect or glob; .env.example (and copies of it) is fine.
+envs="$(printf '%s\n' "$text" | grep -oE "(^|[/[:space:]\"'=<>:(*])\.env(rc)?(\.[A-Za-z0-9_.-]+)?" \
+  | sed -E 's/^[^.]*//' | grep -vE '^\.env\.example' || true)"
+[ -z "$envs" ] || block "$(echo $envs) is off limits: secrets stay out of agents. Use .env.example (key names only)."
+
+[ "$tool" = Bash ] && [ "${AGENT_HUB_ALLOW_MERGE:-}" != 1 ] || exit 0
+why="merging and pushing to the default branch are only for merge tasks the user asked for (proj task --merge). Push your own branch and open or update a pull request instead."
+printf '%s\n' "$text" | grep -qE '(^|[^[:alnum:]_-])gh[[:space:]]+pr[[:space:]]+merge' && block "$why"
+printf '%s\n' "$text" | grep -qE 'pulls/[0-9]+/merge' && block "$why"
+
+default="$(git -C "${cwd:-.}" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
+protected="main master ${default:-main}"
+pushes_protected() { # reads one `git push …` per line, prints x for each push that reaches a protected branch
+  while IFS= read -r p; do
+    set -f; set -- ${p#*push}; set +f
+    n=0
+    for w; do
+      case "$w" in --all|--mirror) echo x; continue ;; -*) continue ;; esac
+      n=$((n + 1))
+      for b in $protected; do
+        case "$w" in "$b"|*:"$b"|*/"$b"|+"$b") echo x ;; esac
+      done
+    done
+    if [ "$n" -le 1 ]; then   # no refspec: pushes the current branch
+      cur="$(git -C "${cwd:-.}" rev-parse --abbrev-ref HEAD 2>/dev/null)"
+      for b in $protected; do [ "$cur" != "$b" ] || echo x; done
+    fi
+  done
+}
+# A function, not a loop inside $(…): bash 3.2 (macOS sh) misparses case patterns there.
+bad="$(printf '%s\n' "$text" | tr ';&|' '\n\n\n' | grep -oE '(^|[[:space:](])git[[:space:]]+push([[:space:]].*)?$' | pushes_protected)"
+[ -z "$bad" ] || block "$why"
+exit 0
