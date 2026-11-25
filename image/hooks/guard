@@ -17,6 +17,8 @@ else
   text="$(printf '%s' "$in" | jq -r '[.tool_input | (.file_path, .path, .notebook_path, .pattern, .glob) | strings] | join(" ")')"
 fi
 block() { echo "agent-hub guard: $*" >&2; exit 2; }
+# From bin/proj via the managed settings env; read from the mounted file when it did not reach this process.
+: "${AGENT_HUB_PROJECT_DIR:=$(jq -r '.env.AGENT_HUB_PROJECT_DIR // empty' "${AGENT_HUB_MANAGED:-/etc/claude-code/managed-settings.json}" 2>/dev/null)}"
 
 # A .env name starts after a path separator, space, quote, redirect or glob; .env.example (and copies of it) is fine.
 envs="$(printf '%s\n' "$text" | grep -oE "(^|[/[:space:]\"'=<>:(*])\.env(rc)?(\.[A-Za-z0-9_.-]+)?" \

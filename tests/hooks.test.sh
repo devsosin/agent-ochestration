@@ -59,6 +59,8 @@ check "Write to /tmp"              allow "$(verdict Write file_path /tmp/scratch
 check "Write to Claude memory"     allow "$(CLAUDE_CONFIG_DIR=/home/node/.claude verdict Write file_path /home/node/.claude/projects/-w/memory/m.md)"
 check "Read outside is fine"       allow "$(verdict Read file_path /etc/hosts)"
 unset AGENT_HUB_PROJECT_DIR
+echo '{"env": {"AGENT_HUB_PROJECT_DIR": "/w/proj"}}' > "$T/m-guard.json"
+check "boundary from managed file" deny "$(AGENT_HUB_MANAGED="$T/m-guard.json" verdict Write file_path /var/agent-hub/tasks/x/meta)"
 check "no project dir: no boundary" allow "$(verdict Write file_path /var/agent-hub/tasks/x/meta)"
 
 # Claude settings files stay with the user, also through the shell.
@@ -106,9 +108,19 @@ check "marketing columns" yes "$(jq -nc --arg c "$r" '{cwd: $c}' | AGENT_HUB_PRO
 # Workspace (project dir is not a repo): one log at its root, with the repo folder as 대상.
 w="$T/ws"; mkdir -p "$w"; git init -q -b main "$w/api"; echo x > "$w/api/b.txt"
 ws="$(jq -nc --arg c "$w/api" '{cwd: $c}' | AGENT_HUB_PROJECT_DIR="$w" "$H/worklog" | jq -r .reason)"
-check "workspace: log at the root" yes "$(printf '%s' "$ws" | grep -qF "in $w." && echo yes || echo no)"
+check "workspace: log at the root" yes "$(printf '%s' "$ws" | grep -qF "$w/log/" && echo yes || echo no)"
 check "workspace: 대상 column" yes "$(printf '%s' "$ws" | grep -qxF '| 일시 | 대상 | 이슈·PR | 작업내용 | 브랜치 |' && echo yes || echo no)"
 check "workspace: repo folder as 대상" yes "$(printf '%s' "$ws" | grep -qE '^\| [0-9-]+ [0-9:]+ \| api \| ' && echo yes || echo no)"
+check "workspace: says not inside a repo" yes "$(printf '%s' "$ws" | grep -q 'workspace root, not inside a repo' && echo yes || echo no)"
+# Values missing from the environment come from the managed settings file (mounted in the container).
+jq -n --arg d "$w" '{env: {AGENT_HUB_PROJECT_DIR: $d, AGENT_HUB_PROFILE: "marketing"}}' > "$T/managed.json"
+ws="$(jq -nc --arg c "$w/api" '{cwd: $c}' | AGENT_HUB_MANAGED="$T/managed.json" "$H/worklog" | jq -r .reason)"
+check "managed file: workspace root" yes "$(printf '%s' "$ws" | grep -qF "$w/log/" && echo yes || echo no)"
+check "managed file: profile columns" yes "$(printf '%s' "$ws" | grep -qxF '| 시각 | 대상 | 에이전트 | 내용 | 참조 |' && echo yes || echo no)"
+# A workspace inside some outer repo (e.g. a versioned home folder) is still a workspace.
+git init -q "$T/outer"; mkdir -p "$T/outer/ws"; git init -q -b main "$T/outer/ws/web"; echo x > "$T/outer/ws/web/c.txt"
+ws="$(jq -nc --arg c "$T/outer/ws/web" '{cwd: $c}' | AGENT_HUB_PROJECT_DIR="$T/outer/ws" "$H/worklog" | jq -r .reason)"
+check "workspace under an outer repo" yes "$(printf '%s' "$ws" | grep -qF "$T/outer/ws/log/" && echo yes || echo no)"
 check "single repo: no 대상 column" no "$(jq -nc --arg c "$r" '{cwd: $c}' | AGENT_HUB_PROJECT_DIR="$r" "$H/worklog" | jq -r .reason | grep -q '대상' && echo yes || echo no)"
 check "second stop passes" "" "$(stop "$r" true)"
 mkdir -p "$r/log"; sleep 1; echo "- line" >> "$r/log/$(date +%Y-%m).md"

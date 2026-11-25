@@ -2,17 +2,20 @@
 # Stop hook for project agents (image/settings/common.json): the work log, a Markdown table in log/YYYY-MM.md.
 # When files changed in the last hour and the log did not change after them, block the stop once and ask the agent
 # for one row. stop_hook_active ends the loop, so it asks at most once per stop.
-# Where: a workspace (AGENT_HUB_PROJECT_DIR that is not a git repo) keeps one log at its root with a 대상 column;
-# otherwise the log is at the repo root (the worktree's, for --worktree tasks), else the working folder.
-# Columns follow the project's profile (AGENT_HUB_PROFILE, set in managed settings by bin/proj).
+# Where: a workspace (project folder without its own .git) keeps one log at its root with a 대상 column, also for
+# tasks inside one of its repos; otherwise the log is at the repo root (the worktree's, for --worktree tasks).
+# Project folder and profile come from bin/proj via the managed settings env; read from the mounted file when the
+# variables did not reach this process.
 # `worklog recent` (SessionStart): prints the newest log's last five rows as context instead.
 mode="${1:-stop}"
 in="$(cat)"
 [ "$mode" = recent ] || [ "$(printf '%s' "$in" | jq -r '.stop_hook_active // false' 2>/dev/null)" = false ] || exit 0
 cwd="$(printf '%s' "$in" | jq -r '.cwd // empty')"
 [ -d "$cwd" ] || exit 0
-root="${AGENT_HUB_PROJECT_DIR:-}"
-if [ -n "$root" ] && [ -d "$root" ] && ! git -C "$root" rev-parse --git-dir >/dev/null 2>&1; then
+managed="${AGENT_HUB_MANAGED:-/etc/claude-code/managed-settings.json}"
+root="${AGENT_HUB_PROJECT_DIR:-$(jq -r '.env.AGENT_HUB_PROJECT_DIR // empty' "$managed" 2>/dev/null)}"
+profile="${AGENT_HUB_PROFILE:-$(jq -r '.env.AGENT_HUB_PROFILE // empty' "$managed" 2>/dev/null)}"
+if [ -n "$root" ] && [ -d "$root" ] && [ ! -e "$root/.git" ]; then
   top="$root"
   case "$cwd/" in "$root"/?*) target="$(printf '%s' "${cwd#"$root"/}" | cut -d/ -f1)" ;; *) target="<repo folder(s)>" ;; esac
 else
@@ -31,14 +34,15 @@ changed="$(find "$top" \( -name .git -o -name node_modules -o -name target -o -n
 [ -n "$changed" ] || exit 0
 
 branch="$(git -C "$cwd" symbolic-ref -q --short HEAD 2>/dev/null)" || branch=-
-case "${AGENT_HUB_PROFILE:-dev}" in
+case "${profile:-dev}" in
   marketing) when=시각; head="에이전트 | 내용 | 참조"; row="<agent, e.g. cmo> | <what you did> | <item IDs and main files, comma-separated>" ;;
   *) when=일시; head="이슈·PR | 작업내용 | 브랜치"; row="<#issue or PR #n, else -> | <what you did> | $branch" ;;
 esac
 [ -z "$target" ] || { head="대상 | $head"; row="$target | $row"; }
 head="| $when | $head |"
 sep="$(printf '%s' "$head" | sed -E 's/[^|]+/---/g')"
-jq -nc --arg r "Before you finish, add one row to the work log $log in $top. If the file is missing, create it with this header:
+where="$top/$log"; [ -z "$target" ] || where="$where (the workspace root, not inside a repo)"
+jq -nc --arg r "Before you finish, add one row to the work log $where. If the file is missing, create it with this header:
 $head
 $sep
 Row (what you did in Korean, one line, no | inside cells):

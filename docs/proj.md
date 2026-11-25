@@ -132,7 +132,7 @@
 
 - 작업은 `bypassPermissions`로 돌므로 allow·ask 규칙은 효과가 없다. 막는 것은 deny와 훅뿐.
 - 훅은 문자열 검사라 셸로 우회할 수 있다. 병합을 확실히 막으려면 GitHub 저장소에서 main 브랜치 보호를 켠다. 폴더 경계(②)도 파일 도구만 막는다.
-- 훅이 쓰는 값은 managed settings `env`에 `bin/proj`가 넣는다: `AGENT_HUB_PROFILE`(기록 열), `AGENT_HUB_PROJECT_DIR`(폴더 경계, 워크스페이스 판단). `proj shell` 세션에도 적용된다.
+- 훅이 쓰는 값은 managed settings `env`에 `bin/proj`가 넣는다: `AGENT_HUB_PROFILE`(기록 열), `AGENT_HUB_PROJECT_DIR`(폴더 경계, 워크스페이스 판단). 환경 변수로 오지 않으면 훅이 마운트된 `/etc/claude-code/managed-settings.json`에서 직접 읽는다. `proj shell` 세션에도 적용된다.
 - 반영하지 않은 것: `rm -rf` 공통 deny(개발 작업이 자주 씀, git으로 복구), 게시·광고 API 호스트 차단(문자열 검사는 우회됨. 컨테이너에 게시 토큰을 주지 않는 것과 네트워크 송신 제한으로 다룸).
 - 저장소 고유 규칙(예: 마케팅 SSOT 보호, 린트 훅)은 그 저장소의 `.claude/settings.json`에 커밋한다. managed 규칙이 우선하고, 에이전트가 고칠 수 있는 파일이라 공통 규칙은 넣지 않는다.
 - 적용: `proj build` 후 프로젝트마다 `proj up <name>`(새 이미지로 컨테이너를 다시 만듦. 훅 스크립트와 시간대가 이미지에 있음). 기존 프로젝트는 `dev`, 마케팅 프로젝트는 `proj profile <name> marketing`.
@@ -147,7 +147,7 @@
 | `dev` | `일시 \| 이슈·PR \| 작업내용 \| 브랜치` |
 | `marketing` | `시각 \| 에이전트 \| 내용 \| 참조` (참조: 항목 ID·주요 파일) |
 
-- 워크스페이스(프로젝트 루트가 git 저장소가 아님): 루트에 기록 하나, 첫 열 뒤에 `대상`(저장소 폴더) 열이 붙는다.
+- 워크스페이스(프로젝트 폴더에 `.git`이 없음): 저장소 안에서 시작한 작업도 워크스페이스 루트에 기록 하나, 첫 열 뒤에 `대상`(저장소 폴더) 열이 붙는다.
 - 단일 저장소: 저장소 루트(`--worktree` 작업은 그 worktree, 브랜치와 함께 커밋).
 - 예 (마케팅): `| 2026-11-25 02:46 | cmo | ceo 신규 C-140~C-144, C-131 갱신. 사실·주장·결정 반영은 쓰기 승인 대기라 대기 파일에 정리 | ceo/items, memory/pending-ssot-edits.md |`
 - 저장소에 이 기록을 검사하는 스크립트가 있으면 이 형식에 맞춘다. 저장소 자체의 같은 Stop 훅·SessionStart 최근 로그 훅은 빼서 두 번 뜨지 않게 한다.
