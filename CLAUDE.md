@@ -14,7 +14,7 @@ mac-agent/
 │   ├── settings/            # permission + hook profiles: common.json + one team file (dev, marketing), merged per project
 │   ├── hooks/               # guard (.env, folder, settings, secrets, merge gate) and worklog hooks → /usr/local/lib/agent-hub/hooks
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
-│   ├── mcp.json             # imagegen MCP at host.docker.internal:7801
+│   ├── mcp.json             # imagegen MCP at host.docker.internal:7801, playwright MCP (headless Chromium in the image)
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
 │   └── gitconfig            # gh credential helper, ssh→https rewrite, safe.directory
 ├── compose/project.yml      # one compose project per registered project (proj-<name>)

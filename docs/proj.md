@@ -91,6 +91,17 @@
 | 준비 | 호스트에서 `codex login`(ChatGPT) → `proj imagegen install`. 이미지에 MCP 설정이 들어가므로 처음 한 번 `proj build` 후 `proj up <name>` |
 | 로그 | `~/.agent-hub/imagegen.log` |
 
+## 브라우저 (Playwright)
+
+| 항목 | 내용 |
+|---|---|
+| 에이전트 | `playwright` MCP(`@playwright/mcp`, `/etc/agent-hub/mcp.json`): headless Chromium, 세션마다 새 프로필(`--isolated`). 스냅샷·스크린샷은 `/tmp/playwright-mcp`(저장소에 남기려면 파일명에 프로젝트 안 절대 경로). 컨테이너 안 개발 서버(`localhost:<port>`)를 열고 클릭·입력·스냅샷·스크린샷 |
+| 저장소 테스트 | `npx playwright test`. 시스템 라이브러리는 이미지에 있음. 저장소의 Playwright 버전이 MCP와 다르면 처음 한 번 `npx playwright install chromium`(시스템 라이브러리 없이, node 권한) |
+| 브라우저 위치 | `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`. 저장소가 따로 받은 브라우저는 컨테이너를 다시 만들면 사라짐 |
+| 브라우저 종류 | Chromium만. Google Chrome은 linux arm64 빌드가 없음 |
+| 글꼴 | `fonts-noto-cjk`(한글). 없으면 스크린샷의 한글이 네모로 나옴 |
+| 적용 | `proj build` 후 `proj up <name>` |
+
 ## Docker (프로젝트 컨테이너 안)
 
 | 항목 | 내용 |
