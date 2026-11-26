@@ -283,7 +283,8 @@ cmd_ls() {
   for f in "$HUB"/projects/*.env; do
     [ -f "$f" ] || continue
     name="$(basename "$f" .env)"
-    state="$(docker inspect -f '{{.State.Status}}' "$(container "$name")" 2>/dev/null || echo absent)"
+    # docker inspect prints an empty line for a missing container, so fall back outside the $(…).
+    state="$(docker inspect -f '{{.State.Status}}' "$(container "$name")" 2>/dev/null)" || state=absent
     printf '%-24s %-5s %-10s %-10s %-6s %s\n' "$name" "$(is_repo "$(project_var "$name" PROJECT_DIR)" && echo repo || echo ws)" \
       "$(project_var "$name" ACCOUNT)" "$state" \
       "$(running_tasks "$name" | wc -l | tr -d ' ')" "$(project_var "$name" ALIAS)"
