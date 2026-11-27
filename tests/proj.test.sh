@@ -105,6 +105,8 @@ check "hub settings: accounts deny follows hub home" "Read(/$AGENT_HUB_HOME/acco
 check "hub settings: plain additionalDirectories" "$HOME/Storage" "$(jq -r '.permissions.additionalDirectories[0]' "$s")"
 
 check "hub may manage plugin sources" yes "$(jq -e '.permissions.allow | index("Bash(proj plugin source*)")' "$s" >/dev/null && echo yes || echo no)"
+check "hub may list and update reference repos" yes "$(jq -e '.permissions.allow | index("Bash(proj ref ls*)") and index("Bash(proj ref update*)")' "$s" >/dev/null && echo yes || echo no)"
+check "hub may not mount reference repos unasked" no "$(jq -e '.permissions.allow | index("Bash(proj ref add*)")' "$s" >/dev/null && echo yes || echo no)"
 check "hub has no allow rule for per-project plugin add/rm" 0 "$(jq '[.permissions.allow[] | select(test("proj plugin \\*|proj plugin [^sl]"))] | length' "$s")"
 
 # Plugins: marketplace clones on the host, per-project managed settings.
