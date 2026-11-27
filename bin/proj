@@ -995,7 +995,6 @@ cmd_task() {
   while :; do
     case "${1:-}" in
       --worktree) wt=1; shift ;;
-      --here) shift ;;   # old flag: running in the checkout is now the default
       --repo) sub="${2:-}"; shift 2 ;;
       --from) from="${2:-}"; shift 2 ;;   # task id or branch: new session on a new branch cut from it
       --merge) merge=1; shift ;;   # the user asked to merge: lifts the guard hook's merge gate for this task
