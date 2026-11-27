@@ -22,6 +22,8 @@
 | `proj profile <name> [dev\|marketing]` | 권한·훅 프로필 보기 / 바꾸기 (다음 작업부터) |
 | `proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE …]` / `rm <plugin@marketplace>` / `ls` | 그 프로젝트에서 플러그인 켜기(옵션은 `env`, `KEY=`는 그 키 삭제) / 끄기 / 목록. `proj plugin ls`는 모든 프로젝트 |
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
+| `proj ref add <name> <owner/repo\|URL>` / `rm <name> <repo>` | 참고 저장소를 `$WORKSPACE_ROOT/refs/<repo>`에 clone(있으면 재사용)하고 그 프로젝트 컨테이너 `/refs/<repo>`에 읽기 전용 마운트 / 마운트 해제(clone은 남김). 컨테이너를 다시 만들므로 실행 중 작업이 있으면 거부 (아래 "참고 저장소") |
+| `proj ref ls [name]` / `update [repo]` | clone 목록(마지막 커밋, 쓰는 프로젝트) 또는 그 프로젝트의 참고 저장소 / 호스트에서 `git pull --ff-only` |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지. 에이전트가 띄운 컨테이너는 멈추기만) / 컨테이너 셸 |
 | `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨, 에이전트가 띄운 컨테이너·네트워크·볼륨(라벨 `agent-hub.project=<name>`, DB 데이터 포함) 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록·대화 기록(`sessions/<name>`)까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
@@ -114,6 +116,19 @@
 | Testcontainers | `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal`, Ryuk 끔(소켓 마운트가 필요해서). 남은 컨테이너는 `proj down`·`rm`이 라벨로 정리 |
 | 준비 | 이 기능 이전에 만든 프로젝트는 `proj build` 후 `proj up <name>` (프록시 서비스 추가) |
 
+## 참고 저장소 (`proj ref`)
+
+작업하지 않고 코드 검토·찾기에만 쓰는 저장소. 작업은 그 저장소의 프로젝트에서 따로 한다.
+
+| 항목 | 내용 |
+|---|---|
+| clone | `$WORKSPACE_ROOT/refs/<repo>` — 프로젝트 checkout과 따로 둔 전용 clone, 기본 브랜치에 둠. `owner/repo`는 호스트 `gh`, URL은 `git clone`. 같은 이름의 다른 저장소면 거부 |
+| 마운트 | 연결한 프로젝트 컨테이너에만 `/refs/<repo>` 읽기 전용(쓰기는 `Read-only file system`). 목록은 `~/.agent-hub/projects/<name>.env`의 `REFS`, compose 추가 파일 `<name>.refs.yml`은 `proj`가 매번 만듦. 다른 계정 프로젝트에는 안 보임 |
+| 갱신 | `proj task`·`proj reply`가 작업을 띄우기 직전에 호스트에서 `git pull --ff-only`. 실패(원격 막힘, 잠금)하면 경고만 하고 작업은 진행. 수동은 `proj ref update [repo]` |
+| 안내 | 작업 지시문에는 넣지 않음. 워크스페이스 CLAUDE.md의 "참고 저장소" 절에 적음(`harness:workspace-claude-md`). `proj ref add`가 넣을 한 줄을 출력 |
+| 이름 | 프로젝트 이름 `refs`는 쓸 수 없음(같은 폴더) |
+| clone 삭제 | 자동으로 지우지 않음. `proj ref ls`에서 쓰는 프로젝트가 없으면 폴더를 지움 |
+
 ## 플러그인
 
 | 항목 | 내용 |
@@ -187,6 +202,8 @@
 | `AGENT_HUB_HOME` | `~/.agent-hub` | 환경변수 (계정 토큰이 있으므로 동기화 폴더에 두지 않는다) |
 
 플러그인: `~/.agent-hub/plugins/<marketplace>/`, 프로젝트별 설정 `~/.agent-hub/projects/<name>.managed-settings.json` (`proj rm`이 함께 삭제).
+
+참고 저장소: clone `$WORKSPACE_ROOT/refs/<repo>/`, 마운트 목록 `REFS`(프로젝트 env 파일), compose 추가 파일 `~/.agent-hub/projects/<name>.refs.yml` (`proj rm`이 함께 삭제, clone은 남김).
 
 작업 기록: `~/.agent-hub/tasks/<name>/<id>/` — `prompt.txt`, `prompts.log`(지시 이력), `log.jsonl`, `stderr.log`, `meta`, `pid`, `exit`, `transcript.md`.
 

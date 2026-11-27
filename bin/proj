@@ -8,6 +8,7 @@ HUB="${AGENT_HUB_HOME:-$HOME/.agent-hub}"
 if [ -f "$HUB/config" ]; then . "$HUB/config"; fi
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-$HOME/workspace}"
 HARNESS_DIR="${HARNESS_DIR:-$WORKSPACE_ROOT/harness}"
+REFS_DIR="$WORKSPACE_ROOT/refs"            # reference repo clones (proj ref), mounted read-only at /refs/<repo>
 DEFAULT_ACCOUNT="${DEFAULT_ACCOUNT:-}"
 MAX_TASKS="${MAX_TASKS:-2}"
 IDLE_HOURS="${IDLE_HOURS:-3}"
@@ -44,9 +45,10 @@ dc() { # dc <name> <compose args...>
   ensure_settings "$name"; mkdir -p "$PLUGINS_DIR"   # missing bind sources would become empty directories
   # Claude Code's session files (bind-mounted ~/.claude/projects) for transcript.md; made here so Docker does not create it.
   export SESSIONS_DIR="$HUB/sessions/$name"; mkdir -p "$SESSIONS_DIR"
+  local refs; refs="$(refs_override "$name")"   # read-only reference repos (proj ref), if any
   # Shell env beats --env-file, so projects made before these variables existed get them too.
   MANAGED_SETTINGS="$(settings_file "$name")" PLUGINS_DIR="$PLUGINS_DIR" \
-    docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" "$@"
+    docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" ${refs:+-f "$refs"} "$@"
 }
 
 # Containers, volumes, networks the project's agent made through its Docker proxy (dockerproxy/server.py).
@@ -170,6 +172,7 @@ cmd_new() {
     esac
   done
   [ ! -f "$(env_file "$name")" ] || die "project already registered: $name"
+  [ "$(printf '%s' "$name" | tr 'A-Z' 'a-z')" != refs ] || die "refs is reserved for reference repos ($(tilde "$REFS_DIR"), proj ref)"
   valid_profile "$profile" || die "unknown profile: $profile (profiles: $(profiles))"
   [ -n "$account" ] || die "no account: pass --account or set DEFAULT_ACCOUNT in $HUB/config"
   [ -s "$(account_dir "$account")/claude.token" ] || die "account '$account' has no Claude token (proj account add $account)"
@@ -276,6 +279,121 @@ cmd_image() { # proj image <name> <image>
   set_var "$1" IMAGE "$2" && dc "$1" up -d
 }
 
+# --- reference repos (proj ref) ------------------------------------------------
+# Host clones in $REFS_DIR, separate from project checkouts and kept on their default branch, so pulls never meet
+# a task's branch. Each project mounts only the ones it lists (REFS in its env file): repos of one account stay
+# out of other accounts' containers. Read-only in the container; the host pulls them before every task run.
+
+refs_file() { printf '%s/projects/%s.refs.yml' "$HUB" "$1"; }
+
+ref_name() { # ref_name <owner/repo | URL>: the repo's last path part without .git
+  local n="${1%/}"; n="${n##*/}"; n="${n##*:}"; n="${n%.git}"
+  valid_name "$n" && [ "$n" != refs ] && printf '%s' "$n"
+}
+
+refs_override() { # refs_override <name>: writes the compose file mounting the project's refs and prints its path (none: nothing)
+  local f r lines=""; f="$(refs_file "$1")"
+  for r in $(project_var "$1" REFS 2>/dev/null || true); do
+    # A missing source would stop compose; the project keeps working without that ref.
+    [ -d "$REFS_DIR/$r/.git" ] || { echo "proj: warning: reference repo $r is missing ($(tilde "$REFS_DIR/$r")); not mounted" >&2; continue; }
+    lines="$lines      - { type: bind, source: \"$REFS_DIR/$r\", target: /refs/$r, read_only: true }
+"
+  done
+  if [ -z "$lines" ]; then rm -f "$f"; return 0; fi
+  printf 'services:\n  agent:\n    volumes:\n%s' "$lines" > "$f"
+  printf '%s' "$f"
+}
+
+pull_ref() { # pull_ref <repo>: fast-forwards the clone; warns instead of prompting, and gives up on a stalled transfer
+  # shortcut: no timeout on connecting (macOS has no timeout(1)); add one if a dead remote ever hangs task starts.
+  GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20 \
+    git -C "$REFS_DIR/$1" pull -q --ff-only >&2 2>&1 \
+    || { echo "proj: warning: could not update reference repo $1; using it as is" >&2; return 1; }
+}
+
+refresh_refs() { # refresh_refs <name>: before a task run; a failed pull never stops the task
+  local r
+  for r in $(project_var "$1" REFS 2>/dev/null || true); do
+    [ ! -d "$REFS_DIR/$r/.git" ] || pull_ref "$r" || true
+  done
+}
+
+cmd_ref() { # proj ref add <name> <owner/repo|URL> | rm <name> <repo> | ls [name] | update [repo]
+  local sub="${1:-ls}"; shift || true
+  case "$sub" in
+    add|rm) ref_change "$sub" "$@" ;;
+    ls) ref_ls "${1:-}" ;;
+    update) ref_update "${1:-}" ;;
+    *) die "usage: proj ref add <name> <owner/repo|URL> | rm <name> <repo> | ls [name] | update [repo]" ;;
+  esac
+}
+
+ref_change() { # ref_change add|rm <name> <source|repo>
+  local op="$1" name="${2:-}" src="${3:-}" r d refs="" x
+  require_project "$name"
+  r="$(ref_name "$src")" || die "usage: proj ref $op <name> $([ "$op" = add ] && echo '<owner/repo|URL>' || echo '<repo>')"
+  # The mounts change only when the container is recreated, which would kill running tasks.
+  [ -z "$(running_tasks "$name")" ] || die "$name has running tasks; recreating its container would kill them. Retry after they finish"
+  for x in $(project_var "$name" REFS); do [ "$x" = "$r" ] || refs="${refs:+$refs }$x"; done
+  [ "$op" = add ] || [ "$refs" != "$(project_var "$name" REFS)" ] || die "$r is not mounted in $name (proj ref ls $name)"
+  d="$REFS_DIR/$r"
+  if [ "$op" = add ]; then
+    case "$src" in */*|*:*) ;; *) die "proj ref add takes owner/repo or a URL: $src" ;; esac
+    if [ -d "$d/.git" ]; then
+      # Same folder name from another owner would silently show the wrong code.
+      case "$(git -C "$d" remote get-url origin 2>/dev/null)" in
+        *"/${src%.git}"|*"/${src%.git}.git"|"${src%.git}"|"${src%.git}.git"|*":${src%.git}"|*":${src%.git}.git") ;;
+        *) die "$(tilde "$d") is a clone of $(git -C "$d" remote get-url origin 2>/dev/null || echo '?'), not $src" ;;
+      esac
+      echo "using the existing clone $(tilde "$d")"
+    else
+      mkdir -p "$REFS_DIR"; fetch_repo "$d" "$src" ""
+    fi
+    refs="${refs:+$refs }$r"
+  fi
+  set_var "$name" REFS "$refs"
+  dc "$name" up -d
+  if [ "$op" = add ]; then
+    echo "$r is mounted read-only at /refs/$r in $name, and updated on the host before each task run."
+    echo "Tell its agents in CLAUDE.md, e.g.: Reference repo $r (read-only, default branch): /refs/$r"
+  else
+    echo "$r unmounted from $name. The clone stays at $(tilde "$d") (proj ref ls shows which projects use it)."
+  fi
+}
+
+ref_ls() { # ref_ls [name]: the project's refs, or every clone with its last commit and the projects using it
+  local d r f users
+  if [ -n "${1:-}" ]; then
+    require_project "$1"
+    for r in $(project_var "$1" REFS); do printf '%-24s /refs/%s  (%s)\n' "$r" "$r" "$(tilde "$REFS_DIR/$r")"; done
+    return 0
+  fi
+  printf '%-24s %-20s %s\n' REPO LAST-COMMIT PROJECTS
+  for d in "$REFS_DIR"/*; do
+    [ -d "$d/.git" ] || continue
+    r="$(basename "$d")"; users=""
+    for f in "$HUB"/projects/*.env; do
+      [ -f "$f" ] || continue
+      case " $(sed -n 's/^REFS=//p' "$f" | head -1) " in *" $r "*) users="${users:+$users }$(basename "$f" .env)" ;; esac
+    done
+    printf '%-24s %-20s %s\n' "$r" "$(git -C "$d" log -1 --format='%h %cs' 2>/dev/null)" "${users:--}"
+  done
+}
+
+ref_update() { # ref_update [repo]: pulls one clone or all of them
+  local d bad=0
+  if [ -n "${1:-}" ]; then
+    [ -d "$REFS_DIR/$1/.git" ] || die "no reference repo $1 (proj ref ls)"
+    pull_ref "$1" && echo "$1: $(git -C "$REFS_DIR/$1" log -1 --format='%h %s')"
+    return
+  fi
+  for d in "$REFS_DIR"/*; do
+    [ -d "$d/.git" ] || continue
+    if pull_ref "$(basename "$d")"; then echo "$(basename "$d"): $(git -C "$d" log -1 --format='%h %s')"; else bad=1; fi
+  done
+  return "$bad"
+}
+
 cmd_ls() {
   local f name state
   # ALIAS goes last: printf pads by bytes, so Korean aliases would misalign later columns.
@@ -319,7 +437,7 @@ $unsaved"
   fi
   rm_started "$name"
   dc "$name" down -v
-  rm "$(env_file "$name")" "$(settings_file "$name")"
+  rm -f "$(env_file "$name")" "$(settings_file "$name")" "$(refs_file "$name")"
   if [ "$purge" = 1 ]; then
     rm -rf "$dir" "$HUB/tasks/$name" "$HUB/sessions/$name"
     echo "removed $what"
@@ -788,6 +906,7 @@ launch() { # launch <task dir> [session id to resume]
   local d="$1" resume="${2:-}" id project workdir sys model merge
   id="$(basename "$d")"; project="$(meta "$d" PROJECT)"; workdir="$(meta "$d" WORKDIR)"
   can_launch "$project"
+  refresh_refs "$project"
   model="$(project_var "$project" MODEL || true)"
   sys="You run inside an agent-hub project container. Task $id, working directory $workdir"
   if [ -n "$(meta "$d" BRANCH)" ]; then
@@ -1141,6 +1260,8 @@ proj — per-project agent containers (docs/proj.md)
   proj plugin ls                              plugins on in every project
   proj profile <name> [dev|marketing]         permission and hook profile (image/settings): show / switch
   proj alias <name> <별칭>                  set the alias the hub matches (e.g. 스모크)
+  proj ref add <name> <owner/repo|URL> | rm <name> <repo>   reference repo mounted read-only at /refs/<repo>
+  proj ref ls [name] | update [repo]          clones in $WORKSPACE_ROOT/refs (pulled before each task run)
   proj ls | up <name> | down <name> | shell <name>
   proj rm <name> [--purge] [--yes]         also deletes what the agent started in Docker; --purge: folder, task records
   proj task <name> [--repo <folder>] [--worktree] [--from <task|branch>] [--merge] <prompt...|->  run claude on a new branch agent/<id> in the checkout (--worktree: in .worktrees/<id>, for parallel work)
@@ -1176,7 +1297,7 @@ cmd_imagegen() { # proj imagegen run [codex] | install | uninstall | status
 main() {
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
-    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|transcript|diff|close|hub|imagegen|plugin|profile) "cmd_$cmd" "$@" ;;
+    build|account|new|add|image|alias|model|usage|idle|ls|up|down|rm|shell|task|reply|status|wait|logs|transcript|diff|close|hub|imagegen|plugin|profile|ref) "cmd_$cmd" "$@" ;;
     help|-h|--help) usage ;;
     *) usage >&2; exit 1 ;;
   esac

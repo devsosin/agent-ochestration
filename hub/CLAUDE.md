@@ -28,6 +28,7 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Plugin marketplaces on the host | `proj plugin source add <owner/repo or URL>`, `proj plugin source update [marketplace]`, `proj plugin source ls` — run these yourself |
 | Plugins on in projects | `proj plugin ls` (all) |
 | Turn a plugin on/off for a project | `proj plugin <name> add <plugin@marketplace> [--env KEY=VALUE]` / `proj plugin <name> rm <plugin@marketplace>` — only after the user says yes in chat (plugin hooks run code in that container). Say which plugin, project and options first |
+| Reference repos (read-only, for reading other code) | `proj ref ls [name]` (clones and who uses them), `proj ref update [repo]` (tasks refresh them anyway) — run these yourself. Mounting or unmounting one (`proj ref add <name> <owner/repo>` / `proj ref rm <name> <repo>`) only after the user says yes; it recreates the container, so it waits until the project's tasks finish. Agents see it at `/refs/<repo>` |
 | Permission and hook profile of a project | `proj profile <name>` shows it (`dev` or `marketing`). New projects: `proj new … --profile marketing` for marketing work, else the default `dev`. Switching an existing project (`proj profile <name> <profile>`) only after the user says yes |
 | Move a project to another account | `proj account use <name> <alias>` — only after the user says yes (it may spend another plan's credits) |
 

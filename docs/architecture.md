@@ -88,6 +88,7 @@ Mac mini
 | 2026-11-25 | 공통 가드에 작업 폴더 경계(파일 도구), `.claude/settings*.json` 쓰기 차단, 기본 브랜치 직접 commit 차단, commit 전 비밀값 검사 추가, 세션 시작 때 최근 작업 기록. `rm -rf` 공통 deny·게시 API 호스트 차단·컨테이너 workspace 신뢰 등록은 하지 않음 (#19) | 사용자 결정 |
 | 2026-11-25 | 병합 예외는 `proj task --merge` 하나: 원격 없는 저장소의 기본 브랜치 로컬 `git merge`도 그 작업에서만, 작업 기록 행은 병합 작업이 기본 브랜치에 바로 commit(로그 전용 브랜치 안 씀) (#23) | 사용자 결정 |
 | 2026-11-25 | 프론트엔드용 Playwright: `base` 이미지에 Playwright MCP와 Chromium·시스템 라이브러리(rust도 상속). 에이전트 브라우저는 headless·isolated MCP (#25) | 사용자 요청, 별도 이미지 대신 base |
+| 2026-11-27 | 참고 저장소: `$WORKSPACE_ROOT/refs/<repo>` 전용 clone을 연결한 프로젝트 컨테이너에만 `/refs/<repo>` 읽기 전용으로. `proj task`·`reply` 직전 호스트에서 pull(실패해도 진행), 안내는 워크스페이스 CLAUDE.md (#30) | 참고용 코드를 에이전트가 고치지 않게, 작업 브랜치와 부딪히지 않게, 다른 계정 프로젝트에 안 보이게 (사용자 결정) |
 
 ## 단계
 

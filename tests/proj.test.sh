@@ -105,6 +105,8 @@ check "hub settings: accounts deny follows hub home" "Read(/$AGENT_HUB_HOME/acco
 check "hub settings: plain additionalDirectories" "$HOME/Storage" "$(jq -r '.permissions.additionalDirectories[0]' "$s")"
 
 check "hub may manage plugin sources" yes "$(jq -e '.permissions.allow | index("Bash(proj plugin source*)")' "$s" >/dev/null && echo yes || echo no)"
+check "hub may list and update reference repos" yes "$(jq -e '.permissions.allow | index("Bash(proj ref ls*)") and index("Bash(proj ref update*)")' "$s" >/dev/null && echo yes || echo no)"
+check "hub may not mount reference repos unasked" no "$(jq -e '.permissions.allow | index("Bash(proj ref add*)")' "$s" >/dev/null && echo yes || echo no)"
 check "hub has no allow rule for per-project plugin add/rm" 0 "$(jq '[.permissions.allow[] | select(test("proj plugin \\*|proj plugin [^sl]"))] | length' "$s")"
 
 # Plugins: marketplace clones on the host, per-project managed settings.
@@ -266,5 +268,48 @@ check "profile: show" "prof: marketing" "$(cmd_profile prof)"
 check "profile: name in env for the work log" marketing "$(jq -r .env.AGENT_HUB_PROFILE "$s")"
 check "profile: project dir in env for the guard" /w/prof "$(jq -r .env.AGENT_HUB_PROJECT_DIR "$s")"
 check "profile: not listed as a plugin option" "prof: harness@devsosin-harness  env: FOO=1" "$(plugin_ls prof)"
+
+# Reference repos (proj ref): host clones mounted read-only, only in the projects that list them.
+check "ref name from owner/repo" api "$(ref_name devsosin/api)"
+check "ref name from https URL" api "$(ref_name https://github.com/devsosin/api.git)"
+check "ref name from ssh URL" api "$(ref_name git@github.com:devsosin/api.git)"
+check "ref name refs is refused" no "$(ref_name devsosin/refs >/dev/null && echo yes || echo no)"
+REFS_DIR="$(mktemp -d)/refs"; o="$(mktemp -d)"
+git init -q --bare -b main "$o/api.git"; git clone -q "$o/api.git" "$o/w" 2>/dev/null
+git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one; git -C "$o/w" push -q origin HEAD:main
+printf 'PROJECT_NAME=refp\nPROJECT_DIR=/w/refp\n' > "$(env_file refp)"
+printf 'PROJECT_NAME=refq\nPROJECT_DIR=/w/refq\n' > "$(env_file refq)"
+dc() { refs_override "$1" >/dev/null; }   # no Docker here: only the override file
+check "no refs: no override file" "" "$(refs_override refp)"
+cmd_ref add refp "file://$o/api.git" >/dev/null 2>&1
+check "ref add clones into REFS_DIR" yes "$([ -d "$REFS_DIR/api/.git" ] && echo yes || echo no)"
+check "ref add lists it" api "$(project_var refp REFS)"
+f="$(refs_override refp)"
+check "override mounts read-only at /refs" 1 "$(grep -c "source: \"$REFS_DIR/api\", target: /refs/api, read_only: true" "$f")"
+check "other project gets no mount" "" "$(refs_override refq)"
+cmd_ref add refp "file://$o/api.git" >/dev/null 2>&1
+check "ref add twice keeps one entry" api "$(project_var refp REFS)"
+cmd_ref add refq "file://$o/api.git" >/dev/null 2>&1
+check "second project reuses the clone" "refp refq" "$(ref_ls | awk '$1 == "api" {print $4, $5}')"
+check "same name from another owner refused" "is a clone of" "$( (cmd_ref add refq other/api) 2>&1 | grep -o 'is a clone of' || true)"
+check "bare name refused for add" "owner/repo or a URL" "$( (cmd_ref add refq api) 2>&1 | grep -o 'owner/repo or a URL' || true)"
+git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m two; git -C "$o/w" push -q origin HEAD:main
+refresh_refs refp
+check "refresh pulls the new commit" "$(git -C "$o/w" rev-parse HEAD)" "$(git -C "$REFS_DIR/api" rev-parse HEAD)"
+git -C "$REFS_DIR/api" remote set-url origin "file://$o/gone.git"
+check "failed pull warns and does not stop" "0 could not update" "$(refresh_refs refp 2>&1 >/dev/null | grep -o 'could not update' | sed 's/^/0 /')"
+check "ref update reports failure" 1 "$(ref_update >/dev/null 2>&1; echo $?)"
+check "ref add refused while a task runs" "running tasks" "$( (running_tasks() { echo t; }; cmd_ref add refp "file://$o/api.git") 2>&1 | grep -o 'running tasks' || true)"
+mv "$REFS_DIR/api" "$REFS_DIR/api.moved"
+check "missing clone is skipped with a warning" "missing" "$(refs_override refp 2>&1 >/dev/null | grep -o missing)"
+check "missing clone leaves no override" "" "$(refs_override refp 2>/dev/null)"
+mv "$REFS_DIR/api.moved" "$REFS_DIR/api"
+cmd_ref rm refp api >/dev/null
+check "ref rm drops it from the list" "" "$(project_var refp REFS)"
+check "ref rm removes the override" no "$([ -f "$(refs_file refp)" ] && echo yes || echo no)"
+check "ref rm keeps the clone" yes "$([ -d "$REFS_DIR/api/.git" ] && echo yes || echo no)"
+check "ref rm of an unmounted ref refused" "not mounted" "$( (cmd_ref rm refp api) 2>&1 | grep -o 'not mounted' || true)"
+check "project name refs is reserved" reserved "$( (cmd_new Refs) 2>&1 | grep -o reserved || true)"
+unset -f dc; rm -rf "$o" "$(dirname "$REFS_DIR")"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
