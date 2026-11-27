@@ -149,8 +149,15 @@ account_ls() {
 
 cmd_build() {
   docker build -t agent-hub:dockerproxy "$REPO_DIR/dockerproxy"
-  docker build --target base -t agent-hub:base "$REPO_DIR/image"
-  docker build --target rust -t agent-hub:rust "$REPO_DIR/image"
+  local tg f name want
+  for tg in base web rust rust-web; do docker build --target "$tg" -t "agent-hub:$tg" "$REPO_DIR/image"; done
+  # Images before the web split had Playwright in base: point out projects whose code now needs another image.
+  for f in "$HUB"/projects/*.env; do
+    [ -f "$f" ] || continue
+    name="$(basename "$f" .env)"
+    want="$(image_union "$(project_var "$name" IMAGE)" "$(image_for "$(project_var "$name" PROJECT_DIR)")")"
+    [ "$want" = "$(project_var "$name" IMAGE)" ] || echo "note: $name uses $(project_var "$name" IMAGE), its code needs $want: proj image $name $want"
+  done
 }
 
 cmd_new() {
@@ -190,7 +197,8 @@ cmd_new() {
   fi
   dir="$(cd "$dir" && pwd -P)"
   if [ -z "$image" ]; then
-    if uses_rust "$dir"; then image=agent-hub:rust; else image=agent-hub:base; fi
+    # Marketing work needs no toolchain or browser; switch with proj image when it does.
+    if [ "$profile" = marketing ]; then image=agent-hub:base; else image="$(image_for "$dir")"; fi
   fi
 
   mkdir -p "$HUB/projects" "$HUB/tasks/$name"
@@ -209,6 +217,7 @@ EOF
   docker volume create cargo-registry >/dev/null
   docker volume create cargo-git >/dev/null
   dc "$name" up -d
+  sync_lsp "$name"
   echo "project '$name' ready: $(tilde "$dir") (account $account, image $image)"
 }
 
@@ -217,6 +226,38 @@ is_repo() { # true only for the top of a git checkout (not a folder inside one)
 }
 
 uses_rust() { [ -f "$1/Cargo.toml" ] || ls "$1"/*/Cargo.toml >/dev/null 2>&1; }
+uses_web() { [ -f "$1/package.json" ] || ls "$1"/*/package.json >/dev/null 2>&1; }
+
+# Images (image/Dockerfile targets): base, web (Playwright), rust (toolchain, rust-analyzer), rust-web (both).
+image_name() { # image_name <rust 0|1> <web 0|1>
+  case "$1$2" in 11) echo agent-hub:rust-web ;; 10) echo agent-hub:rust ;; 01) echo agent-hub:web ;; *) echo agent-hub:base ;; esac
+}
+image_for() { # image_for <dir>: the image the code in <dir> needs (a workspace: its repos one level down)
+  local r=0 w=0; uses_rust "$1" && r=1; uses_web "$1" && w=1; image_name "$r" "$w"
+}
+image_union() { # image_union <current> <needed>: our smallest image with both; an image of the user's own stays as it is
+  local r=0 w=0 i
+  case "$1" in agent-hub:base|agent-hub:web|agent-hub:rust|agent-hub:rust-web) ;; *) echo "$1"; return ;; esac
+  for i in "$1" "$2"; do
+    case "$i" in *rust*) r=1 ;; esac
+    case "$i" in *web) w=1 ;; esac
+  done
+  image_name "$r" "$w"
+}
+
+# Claude Code's rust-analyzer LSP plugin, on in Rust images when its marketplace is on the host.
+LSP_PLUGIN=rust-analyzer-lsp@claude-plugins-official
+sync_lsp() { # sync_lsp <name>
+  local on m="${LSP_PLUGIN#*@}"
+  on="$(jq -r --arg p "$LSP_PLUGIN" '.enabledPlugins[$p] // false' "$(settings_file "$1")" 2>/dev/null || echo false)"
+  case "$(project_var "$1" IMAGE)" in
+    agent-hub:rust|agent-hub:rust-web)
+      [ "$on" != true ] || return 0
+      if [ -d "$PLUGINS_DIR/$m" ]; then plugin_add "$1" "$LSP_PLUGIN" >/dev/null && echo "$1: rust-analyzer LSP on ($LSP_PLUGIN)"
+      else echo "note: for rust-analyzer in Claude Code, run: proj plugin source add anthropics/claude-plugins-official (then proj image $1 $(project_var "$1" IMAGE))"; fi ;;
+    *) [ "$on" != true ] || plugin_rm "$1" "$LSP_PLUGIN" >/dev/null ;;   # no rust-analyzer in this image
+  esac
+}
 
 fetch_repo() { # fetch_repo <dir> <repo: URL | owner/name | ""> <create: "" | private | public>
   local dir="$1" repo="$2" create="$3"
@@ -245,7 +286,7 @@ set_var() { # set_var <name> <KEY> <value>: replace one line of the project's en
 }
 
 cmd_add() { # proj add <workspace> <repo-folder> [--repo URL|owner/name | --create [--public]]
-  local name="${1:-}" sub="${2:-}" repo="" create="" dir
+  local name="${1:-}" sub="${2:-}" repo="" create="" dir cur want
   require_project "$name"
   valid_name "$sub" || die "usage: proj add <workspace> <repo-folder> [--repo URL|owner/name | --create [--public]]"
   shift 2
@@ -262,21 +303,23 @@ cmd_add() { # proj add <workspace> <repo-folder> [--repo URL|owner/name | --crea
   ! is_repo "$dir" || die "$name is a single-repo project; proj add is for workspaces (proj new <name> --workspace)"
   fetch_repo "$dir/$sub" "$repo" "$create"
   echo "added $sub to $name ($(tilde "$dir/$sub"))"
-  if uses_rust "$dir/$sub" && [ "$(project_var "$name" IMAGE)" = agent-hub:base ]; then
+  cur="$(project_var "$name" IMAGE)"; want="$(image_union "$cur" "$(image_for "$dir/$sub")")"
+  if [ "$want" != "$cur" ]; then
     if [ -z "$(running_tasks "$name")" ]; then
-      set_var "$name" IMAGE agent-hub:rust && dc "$name" up -d >/dev/null 2>&1
-      echo "switched $name to agent-hub:rust ($sub is a Rust repo)"
+      set_var "$name" IMAGE "$want" && dc "$name" up -d >/dev/null 2>&1
+      sync_lsp "$name"
+      echo "switched $name to $want (for $sub)"
     else
-      echo "note: $sub is a Rust repo; switch the image after tasks finish: proj image $name agent-hub:rust"
+      echo "note: $sub needs $want; switch after tasks finish: proj image $name $want"
     fi
   fi
 }
 
 cmd_image() { # proj image <name> <image>
   require_project "${1:-}"
-  [ -n "${2:-}" ] || die "usage: proj image <name> agent-hub:base|agent-hub:rust"
+  [ -n "${2:-}" ] || die "usage: proj image <name> agent-hub:base|web|rust|rust-web"
   [ -z "$(running_tasks "$1")" ] || die "$1 has running tasks; recreating the container would kill them"
-  set_var "$1" IMAGE "$2" && dc "$1" up -d
+  set_var "$1" IMAGE "$2" && dc "$1" up -d && sync_lsp "$1"
 }
 
 # --- reference repos (proj ref) ------------------------------------------------
@@ -1243,11 +1286,11 @@ usage() {
   cat <<'EOF'
 proj — per-project agent containers (docs/proj.md)
 
-  proj build                               build agent-hub:base, agent-hub:rust, agent-hub:dockerproxy
+  proj build                               build agent-hub:base, web, rust, rust-web, dockerproxy
   proj account add <alias> | ls            store / list account tokens
   proj new <name> [--repo URL|owner/name | --create [--public] | --workspace] [--alias 별칭] [--account A] [--image I] [--mem 6g] [--profile dev|marketing]
   proj add <workspace> <folder> [--repo URL|owner/name | --create [--public]]   add a repo to a workspace
-  proj image <name> agent-hub:base|agent-hub:rust
+  proj image <name> agent-hub:base|web|rust|rust-web   (new/add pick it from the code)
   proj model <name> [model|-]                 model for the project's tasks (- = default)
   proj account use <name> <alias>             switch a project to another account
   proj usage [--refresh]                      5h / 7d limit usage per account
@@ -1272,7 +1315,7 @@ EOF
 }
 
 # --- imagegen (MCP server on the host, uses the host's Codex ChatGPT login) ---------
-IMAGEGEN_PORT=7801  # same port in image/mcp.json
+IMAGEGEN_PORT=7801  # same port in image/mcp.json and mcp-web.json
 cmd_imagegen() { # proj imagegen run [codex] | install | uninstall | status
   case "${1:-status}" in
     run)

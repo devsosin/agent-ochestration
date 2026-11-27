@@ -18,7 +18,7 @@ Mac mini
 | 구성요소 | 위치 | 역할 |
 |---|---|---|
 | `bin/proj` | 호스트 | 프로젝트·계정·작업 관리 CLI ([proj.md](proj.md)) |
-| `agent-hub:base` / `agent-hub:rust` | 이미지 | Claude Code, gh, git, Node (+ Rust) |
+| `agent-hub:base` / `web` / `rust` / `rust-web` | 이미지 | Claude Code, gh, git, Node (+ Playwright·Chromium / + Rust·rust-analyzer / 둘 다). 코드로 자동 선택 |
 | `compose/project.yml` | 프로젝트당 compose 프로젝트 `proj-<name>` | 마운트·시크릿·메모리 상한. 서비스 `agent`(에이전트), `docker`(Docker 프록시) |
 | `agent-hub:dockerproxy` | 이미지 (`dockerproxy/`) | 호스트 Docker 소켓을 갖고 그 프로젝트 것만 통과시키는 API 프록시 (아래 보안 경계) |
 | harness | `~/workspace/harness` → `/opt/harness:ro` | managed settings로 마켓플레이스 등록·활성화(기본 켬). 호스트에서 고치면 다음 세션부터 반영 |
@@ -89,6 +89,7 @@ Mac mini
 | 2026-11-25 | 병합 예외는 `proj task --merge` 하나: 원격 없는 저장소의 기본 브랜치 로컬 `git merge`도 그 작업에서만, 작업 기록 행은 병합 작업이 기본 브랜치에 바로 commit(로그 전용 브랜치 안 씀) (#23) | 사용자 결정 |
 | 2026-11-25 | 프론트엔드용 Playwright: `base` 이미지에 Playwright MCP와 Chromium·시스템 라이브러리(rust도 상속). 에이전트 브라우저는 headless·isolated MCP (#25) | 사용자 요청, 별도 이미지 대신 base |
 | 2026-11-27 | 참고 저장소: `$WORKSPACE_ROOT/refs/<repo>` 전용 clone을 연결한 프로젝트 컨테이너에만 `/refs/<repo>` 읽기 전용으로. `proj task`·`reply` 직전 호스트에서 pull(실패해도 진행), 안내는 워크스페이스 CLAUDE.md (#30) | 참고용 코드를 에이전트가 고치지 않게, 작업 브랜치와 부딪히지 않게, 다른 계정 프로젝트에 안 보이게 (사용자 결정) |
+| 2026-11-27 | 이미지를 개발 환경별로 나눔: `base` / `web`(Playwright) / `rust`(+ rust-analyzer, LSP 플러그인 자동) / `rust-web`. `Cargo.toml`·`package.json`으로 자동 선택, 마케팅은 `base`. #25의 base 포함 결정을 바꿈 (#29) | Rust 컨테이너에 브라우저(약 1.1GB)가 필요 없고, 프론트에는 rust가 필요 없음 (사용자 결정) |
 
 ## 단계
 

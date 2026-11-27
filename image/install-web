@@ -1,0 +1,14 @@
+#!/bin/sh
+# Web layer of the agent image (targets web, rust-web): Playwright MCP and its Chromium with the system libraries,
+# which need root. Usage: install-web <@playwright/mcp version>. PLAYWRIGHT_BROWSERS_PATH is set by the Dockerfile.
+# Chromium, not Chrome: Chrome has no linux arm64 build. A repo on another Playwright version downloads its own
+# browser into the same node-owned folder (npx playwright install chromium); the libraries are already here.
+# fonts-noto-cjk: Korean text renders as boxes in screenshots without it.
+set -eu
+apt-get update
+apt-get install -y --no-install-recommends fonts-noto-cjk
+npm install -g "@playwright/mcp@${1:-latest}"
+node "$(npm root -g)/@playwright/mcp/node_modules/playwright/cli.js" install --with-deps chromium
+chown -R node:node "$PLAYWRIGHT_BROWSERS_PATH"
+npm cache clean --force
+rm -rf /var/lib/apt/lists/*

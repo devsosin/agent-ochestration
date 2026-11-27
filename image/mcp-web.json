@@ -1,0 +1,6 @@
+{
+  "mcpServers": {
+    "imagegen": { "type": "http", "url": "http://host.docker.internal:7801/mcp" },
+    "playwright": { "type": "stdio", "command": "playwright-mcp", "args": ["--headless", "--isolated", "--browser", "chromium", "--output-dir", "/tmp/playwright-mcp"] }
+  }
+}

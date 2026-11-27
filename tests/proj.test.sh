@@ -314,4 +314,31 @@ unset -f dc; rm -rf "$o" "$(dirname "$REFS_DIR")"
 
 check "task refuses an unknown option" "unknown option: --here" "$( (cmd_task demo --here hi) 2>&1 | grep -o 'unknown option: --here' || true)"
 
+# Images by code: Cargo.toml → rust, package.json → web, both → rust-web; switching only adds.
+w="$(mktemp -d)"; mkdir -p "$w/api" "$w/fe"
+check "image: nothing → base" agent-hub:base "$(image_for "$w")"
+touch "$w/fe/package.json"
+check "image: package.json → web" agent-hub:web "$(image_for "$w")"
+touch "$w/api/Cargo.toml"
+check "image: both → rust-web" agent-hub:rust-web "$(image_for "$w")"
+check "image: rust only" agent-hub:rust "$(image_for "$w/api")"
+check "union: rust + web repo" agent-hub:rust-web "$(image_union agent-hub:rust agent-hub:web)"
+check "union: never drops a part" agent-hub:rust "$(image_union agent-hub:rust agent-hub:base)"
+check "union: user image kept" my/img:1 "$(image_union my/img:1 agent-hub:rust)"
+rm -rf "$w"
+
+# rust-analyzer LSP plugin follows the image, when its marketplace is on the host.
+printf 'PROJECT_NAME=lsp\nPROJECT_DIR=/w/lsp\nIMAGE=agent-hub:rust\n' > "$(env_file lsp)"
+check "lsp: no marketplace, only a note" "proj plugin source add anthropics/claude-plugins-official" "$(sync_lsp lsp | grep -o 'proj plugin source add anthropics/claude-plugins-official')"
+mkdir -p "$PLUGINS_DIR/claude-plugins-official/.claude-plugin"
+echo '{"name":"claude-plugins-official","plugins":[{"name":"rust-analyzer-lsp"}]}' > "$PLUGINS_DIR/claude-plugins-official/.claude-plugin/marketplace.json"
+sync_lsp lsp >/dev/null
+check "lsp: on for rust" true "$(jq -r '.enabledPlugins["rust-analyzer-lsp@claude-plugins-official"]' "$(settings_file lsp)")"
+check "lsp: marketplace mounted" /opt/plugins/claude-plugins-official "$(jq -r '.extraKnownMarketplaces["claude-plugins-official"].source.path' "$(settings_file lsp)")"
+check "lsp: second sync changes nothing" "" "$(sync_lsp lsp)"
+set_var lsp IMAGE agent-hub:web; sync_lsp lsp
+check "lsp: off without rust" null "$(jq -r '.enabledPlugins["rust-analyzer-lsp@claude-plugins-official"]' "$(settings_file lsp)")"
+check "lsp: harness stays on" true "$(jq -r '.enabledPlugins["harness@devsosin-harness"]' "$(settings_file lsp)")"
+rm -rf "$PLUGINS_DIR/claude-plugins-official"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
