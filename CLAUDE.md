@@ -9,12 +9,13 @@ Git repository: `devsosin/agent-ochestration` (public — never commit tokens, h
 ```text
 mac-agent/
 ├── bin/proj                 # CLI: projects, accounts, tasks (bash 3.2-compatible)
-├── image/                   # Agent image: Dockerfile (targets base, rust) + files copied into it
+├── image/                   # Agent image: Dockerfile (targets base, web, rust, rust-web) + files copied into it
 │   ├── managed-settings.json  # default managed settings (harness on); bin/proj copies it per project
 │   ├── settings/            # permission + hook profiles: common.json + one team file (dev, marketing), merged per project
 │   ├── hooks/               # guard (.env, folder, settings, secrets, merge gate) and worklog hooks → /usr/local/lib/agent-hub/hooks
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
-│   ├── mcp.json             # imagegen MCP at host.docker.internal:7801, playwright MCP (headless Chromium in the image)
+│   ├── mcp.json             # imagegen MCP at host.docker.internal:7801; mcp-web.json adds playwright (web, rust-web)
+│   ├── install-web          # Playwright MCP + Chromium + Korean fonts (web layer)
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
 │   └── gitconfig            # gh credential helper, ssh→https rewrite, safe.directory
 ├── compose/project.yml      # one compose project per registered project (proj-<name>)
@@ -73,7 +74,7 @@ bash tests/proj.test.sh                 # helper unit checks
 bash tests/imagegen.test.sh             # imagegen MCP server (fake codex)
 bash tests/hooks.test.sh                # agent hooks (guard, worklog)
 python3 tests/dockerproxy_test.py       # Docker proxy rules (fake daemon)
-bin/proj build                          # builds agent-hub:base, agent-hub:rust, agent-hub:dockerproxy
+bin/proj build                          # builds agent-hub:base, web, rust, rust-web, dockerproxy
 ```
 
 Smoke test without touching real state (scratch dirs, fake token; task fails on auth but exercises the pipeline):

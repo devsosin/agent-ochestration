@@ -11,11 +11,11 @@ The user usually talks to you from a phone or browser (Remote Control). Talk to 
 | Need | Command |
 |---|---|
 | What exists (names, kind `repo`/`ws`, Korean aliases) | `proj ls`, `proj status` |
-| Resume an existing GitHub repo | `proj new <name> --repo <owner/name or URL> --alias <별칭>` (Rust repos get `agent-hub:rust` automatically) |
+| Resume an existing GitHub repo | `proj new <name> --repo <owner/name or URL> --alias <별칭>` (the image follows the code: Rust → `agent-hub:rust`, `package.json` → `agent-hub:web`, both → `agent-hub:rust-web`) |
 | New single-repo project | `proj new <name> --create --alias <별칭>` (new private GitHub repo) |
 | New multi-repo workspace | `proj new <name> --workspace --alias <별칭>`, then `proj add <name> <folder> --create` (new repo) or `--repo <owner/name>` (existing) per repo |
 | Adopt a folder already in the workspace root (`WORKSPACE_ROOT`) | `proj new <name> --alias <별칭>` |
-| Name a project / switch image | `proj alias <name> <별칭>` / `proj image <name> agent-hub:rust` |
+| Name a project / switch image | `proj alias <name> <별칭>` / `proj image <name> agent-hub:base|web|rust|rust-web` (only `web`/`rust-web` have a browser) |
 | Delegate work | `proj task <name> [--repo <folder>] - <<'EOF'` … `EOF` (prompt on stdin) |
 | Follow up on a task | `proj reply <task> - <<'EOF'` … `EOF` |
 | Wait for the result | `proj wait <task>` (blocks until it ends, up to 30 min) |
@@ -44,7 +44,7 @@ The user gives plain instructions ("스모크에 로그인 API 추가해", "블�
 2. A follow-up to a task in this conversation ("거기에 테스트도 추가해") is `proj reply <task>`, not a new task. If `reply` says the session is gone, or the user wants a fresh session on top of earlier work, use `proj task <name> --from <task> …` (new session, new branch cut from that task's branch) and say so in the report.
 3. Write a self-contained English prompt — the project agent has no memory of this chat: goal and why, constraints, acceptance criteria, how to verify, which harness skill fits (`harness:implement`, `harness:github-issue`, `harness:github-pr`, `harness:frontend`). Ask for a PR only if the user did.
 4. Then `proj wait <task>` and report the result, unless the user says not to wait. Several independent requests: start them all (at most `MAX_TASKS` = 2 at once; `proj task` refuses beyond that), then wait for each. Never use sleep loops or `proj logs -f`.
-5. For a new project, ask only what you cannot infer: one repo or a workspace of several, name, alias, public/private. Default account; the image follows the code (Rust → `agent-hub:rust`). For a new workspace, make the first task "write the workspace CLAUDE.md" (`harness:workspace-claude-md`) once its repos exist.
+5. For a new project, ask only what you cannot infer: one repo or a workspace of several, name, alias, public/private. Default account; the image follows the code (`proj new` picks it; marketing projects get `agent-hub:base`). For a new workspace, make the first task "write the workspace CLAUDE.md" (`harness:workspace-claude-md`) once its repos exist.
 
 ## Usage limits
 

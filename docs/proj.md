@@ -6,13 +6,13 @@
 
 | 명령 | 하는 일 |
 |---|---|
-| `proj build` | 이미지 `agent-hub:base`, `agent-hub:rust`, `agent-hub:dockerproxy` 빌드 (Claude Code 업데이트도 이것으로) |
+| `proj build` | 이미지 `agent-hub:base`, `web`, `rust`, `rust-web`, `dockerproxy` 빌드 (Claude Code 업데이트도 이것으로). 코드에 맞지 않는 이미지를 쓰는 프로젝트는 `proj image` 명령을 안내 (아래 "이미지") |
 | `proj account add <alias>` / `ls` | 계정 토큰 저장 / 목록 ([accounts.md](accounts.md)) |
-| `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g] [--profile dev\|marketing]` | `$WORKSPACE_ROOT/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 `Cargo.toml`이 있을 때 rust. 프로필 기본 `dev` (아래 "권한·훅 프로필") |
+| `proj new <name> [--repo URL\|owner/name] [--alias 별칭] [--account A] [--image I] [--mem 6g] [--profile dev\|marketing]` | `$WORKSPACE_ROOT/<name>`을 clone(`owner/name`은 호스트 `gh`로, 비공개 포함)·새로 만들기(빈 초기 커밋)·기존 폴더 등록 후 컨테이너 시작. 이미지를 안 주면 코드로 고름(아래 "이미지"), 마케팅 프로필은 `base`. 프로필 기본 `dev` (아래 "권한·훅 프로필") |
 | `proj new <name> --create [--public]` | 위와 같이 새로 만들고, 호스트 `gh`로 GitHub 저장소(기본 비공개)를 만들어 `origin`으로 push |
 | `proj new <name> --workspace` | 여러 저장소를 담는 빈 워크스페이스 폴더 (루트는 git 저장소가 아님) |
-| `proj add <ws> <folder> [--repo URL\|owner/name \| --create [--public]]` | 워크스페이스에 저장소 추가: clone 또는 새로 만들기(+GitHub). Rust 저장소면 이미지를 rust로 전환 |
-| `proj image <name> <image>` | 이미지 바꾸고 컨테이너 재생성 (실행 중 작업이 있으면 거부) |
+| `proj add <ws> <folder> [--repo URL\|owner/name \| --create [--public]]` | 워크스페이스에 저장소 추가: clone 또는 새로 만들기(+GitHub). 그 저장소에 필요한 이미지로 넓힘(예: rust + 프론트 → `rust-web`, 실행 중 작업이 없을 때) |
+| `proj image <name> <image>` | 이미지 바꾸고 컨테이너 재생성 (실행 중 작업이 있으면 거부). rust 계열이면 rust-analyzer LSP 플러그인을 켜고, 아니면 끔 |
 | `proj model <name> [model\|-]` | 그 프로젝트 작업에 쓸 모델 (`-`는 기본값). 다음 작업부터 적용, 재시작 없음 |
 | `proj usage [--refresh]` | 계정별 5시간·7일 한도 사용률과 초기화 시각. `--refresh`는 계정마다 아주 짧은 요청(Haiku, 약 900토큰)을 보내 최신 값을 받음 |
 | `proj idle [시간]` / `idle install [시간]` / `idle uninstall` | 작업·셸·활동이 없는 지 N시간(기본 3) 지난 컨테이너 중지. 에이전트가 띄운 컨테이너(DB 등)는 활동으로 보지 않고 함께 멈춤. `install`은 30분마다 실행하도록 launchd 등록. 멈춘 컨테이너는 다음 작업이나 `proj up`에서 다시 켜짐 |
@@ -93,15 +93,31 @@
 | 준비 | 호스트에서 `codex login`(ChatGPT) → `proj imagegen install`. 이미지에 MCP 설정이 들어가므로 처음 한 번 `proj build` 후 `proj up <name>` |
 | 로그 | `~/.agent-hub/imagegen.log` |
 
+## 이미지
+
+| 이미지 | 내용 | 자동 선택 |
+|---|---|---|
+| `agent-hub:base` | Claude Code, gh, git, Node, Docker CLI | 아래에 해당 없음, 마케팅 프로필 |
+| `agent-hub:web` | base + Playwright MCP, Chromium, 한글 글꼴 | `package.json` |
+| `agent-hub:rust` | base + Rust(rustfmt, clippy, rust-analyzer) | `Cargo.toml` |
+| `agent-hub:rust-web` | rust + web | 둘 다 |
+
+- 판단: 프로젝트 폴더와 한 단계 아래(워크스페이스의 저장소). `proj add`는 넓히기만 하고 줄이지 않음. 직접 지정한 다른 이미지는 건드리지 않음.
+- rust-analyzer: rust 계열 이미지에서 Claude Code LSP 플러그인 `rust-analyzer-lsp@claude-plugins-official`을 켬(정의·참조 찾기). 호스트에 마켓플레이스가 있어야 함: `proj plugin source add anthropics/claude-plugins-official` 후 `proj image <name> <같은 이미지>`(또는 `proj new`·`add`가 자동).
+- MCP: 모든 이미지에 `imagegen`, web 계열에만 `playwright`(`image/mcp.json` / `image/mcp-web.json` → `/etc/agent-hub/mcp.json`).
+- 바꾼 뒤(#29 이전 프로젝트): `proj build`가 코드에 맞지 않는 프로젝트를 알려 줌 → `proj image <name> <image>`. 예전 base에는 Playwright가 있었으므로 프론트 프로젝트는 `web`으로 옮겨야 함.
+
 ## 브라우저 (Playwright)
 
 | 항목 | 내용 |
 |---|---|
+| 이미지 | `agent-hub:web`, `agent-hub:rust-web`만 (위 "이미지") |
 | 에이전트 | `playwright` MCP(`@playwright/mcp`, `/etc/agent-hub/mcp.json`): headless Chromium, 세션마다 새 프로필(`--isolated`). 스냅샷·스크린샷은 `/tmp/playwright-mcp`(저장소에 남기려면 파일명에 프로젝트 안 절대 경로). 컨테이너 안 개발 서버(`localhost:<port>`)를 열고 클릭·입력·스냅샷·스크린샷 |
 | 저장소 테스트 | `npx playwright test`. 시스템 라이브러리는 이미지에 있음. 저장소의 Playwright 버전이 MCP와 다르면 처음 한 번 `npx playwright install chromium`(시스템 라이브러리 없이, node 권한) |
 | 브라우저 위치 | `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`. 저장소가 따로 받은 브라우저는 컨테이너를 다시 만들면 사라짐 |
 | 브라우저 종류 | Chromium만. Google Chrome은 linux arm64 빌드가 없음 |
 | 글꼴 | `fonts-noto-cjk`(한글). 없으면 스크린샷의 한글이 네모로 나옴 |
+| 외부 사이트 | 페이지 읽기는 WebFetch·WebSearch가 먼저. headless Chromium은 봇으로 판별되기 쉬움(`navigator.webdriver`, `HeadlessChrome` UA, 반복 접속). 차단·CAPTCHA가 나오면 우회하지 않고 멈춰서 보고 |
 | 적용 | `proj build` 후 `proj up <name>` |
 
 ## Docker (프로젝트 컨테이너 안)
