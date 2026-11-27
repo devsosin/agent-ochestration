@@ -312,4 +312,6 @@ check "ref rm of an unmounted ref refused" "not mounted" "$( (cmd_ref rm refp ap
 check "project name refs is reserved" reserved "$( (cmd_new Refs) 2>&1 | grep -o reserved || true)"
 unset -f dc; rm -rf "$o" "$(dirname "$REFS_DIR")"
 
+check "task refuses an unknown option" "unknown option: --here" "$( (cmd_task demo --here hi) 2>&1 | grep -o 'unknown option: --here' || true)"
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

@@ -998,6 +998,7 @@ cmd_task() {
       --repo) sub="${2:-}"; shift 2 ;;
       --from) from="${2:-}"; shift 2 ;;   # task id or branch: new session on a new branch cut from it
       --merge) merge=1; shift ;;   # the user asked to merge: lifts the guard hook's merge gate for this task
+      --*) die "unknown option: $1" ;;   # not silently part of the prompt
       *) break ;;
     esac
   done
