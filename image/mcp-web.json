@@ -1,6 +1,7 @@
 {
   "mcpServers": {
     "imagegen": { "type": "http", "url": "http://host.docker.internal:7801/mcp" },
+    "knowledge": { "type": "http", "url": "http://knowledge-mcp:8787/mcp", "headers": { "Authorization": "Bearer ${KNOWLEDGE_TOKEN}" } },
     "playwright": { "type": "stdio", "command": "playwright-mcp", "args": ["--headless", "--isolated", "--browser", "chromium", "--output-dir", "/tmp/playwright-mcp"] }
   }
 }

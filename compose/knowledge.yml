@@ -1,0 +1,35 @@
+# knowledge MCP server for project agents (image built from the knowledge repo: proj knowledge build). Driven by bin/proj:
+#   docker compose -p agent-hub-knowledge -f compose/knowledge.yml up -d   (proj knowledge up)
+# Not published on the host: bin/proj connects it to the network of each project with knowledge on, so projects stay
+# apart. No agent-hub.project label, so project Docker proxies cannot touch it.
+services:
+  knowledge-mcp:
+    image: agent-hub:knowledge-mcp
+    container_name: knowledge-mcp
+    init: true
+    restart: unless-stopped
+    environment:
+      KNOWLEDGE_ROOT: /knowledge
+      MCP_CONFIG: /etc/knowledge/mcp.config.json
+      MCP_BIND: 0.0.0.0
+      MCP_PORT: "8787"
+    # The server reads its GitHub token (propose_update) from the environment; it stays a secret file until here.
+    entrypoint: ["/bin/sh", "-c", "KNOWLEDGE_GITHUB_TOKEN=\"$$(cat /run/secrets/knowledge_github_token 2>/dev/null)\"; export KNOWLEDGE_GITHUB_TOKEN; exec \"$$0\" \"$$@\""]
+    command: ["npm", "run", "mcp"]
+    secrets: [knowledge_github_token]
+    tmpfs: [/tmp]   # propose_update clones into a temp dir per request
+    volumes:
+      - ${KNOWLEDGE_SRC:?}:/knowledge:ro
+      - ${KNOWLEDGE_DIR:?}/db:/knowledge/db   # ETL output (run by the user on the host) and the server's index.sqlite
+      - ${KNOWLEDGE_DIR}/mcp.config.json:/etc/knowledge/mcp.config.json:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/healthz').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 512m
+
+secrets:
+  knowledge_github_token:
+    file: ${KNOWLEDGE_DIR}/github.token
