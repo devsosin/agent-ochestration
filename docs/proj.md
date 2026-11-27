@@ -156,6 +156,9 @@
 | 갱신 | `proj plugin source update [marketplace]` — 컨테이너는 플러그인 코드를 바꿀 수 없음 |
 | 준비 | 이 기능 이전에 만든 프로젝트는 `proj up <name>` 한 번 (새 마운트 추가) |
 
+- skill 호출(headless 작업): 지시문에 skill 이름을 그대로 쓴다. 플러그인 skill은 `/ponytail:ponytail-audit`처럼 `<플러그인>:<skill>` 형태로 `claude -p`의 slash command 목록에 올라온다(init 이벤트에서 확인). 실제 실행까지는 계정 로그인이 있는 맥미니에서 확인 필요.
+- ponytail 지도(SessionStart): 저장소의 최상위 공개 이름을 폴더별로 모아 2000자(`PONYTAIL_MAP_CHARS`) 안에서 넣는다. Rust는 줄 맨 앞 `pub fn|struct|enum|trait|type`만 잡고 `const`·`static`·`pub(crate)`·macro는 빠진다. 지도 길이는 늘리지 않는다(결정). 흩어진 상수 찾기는 clippy·rust-analyzer·grep으로.
+
 ## 권한·훅 프로필
 
 프로젝트 managed settings(`~/.agent-hub/projects/<name>.managed-settings.json`, 읽기 전용 마운트)에 `image/settings/common.json` + 팀 프로필을 합쳐 넣는다. deny 목록과 훅은 이어 붙이고, 플러그인·`env`는 그대로 둔다. `proj up`·작업 시작 때 저장소 파일로 다시 맞추므로 `git pull`만으로 반영된다.
@@ -163,7 +166,7 @@
 | 프로필 | 내용 |
 |---|---|
 | 공통 | `.env` 계열·`*.pem`·`*.key` Read/Edit deny, `sudo` deny. 가드 훅, 작업 기록 훅, 세션 시작 때 최근 기록 |
-| `dev` (기본) | 추가 deny 없음: issue, 브랜치 push, `gh pr create` 가능. 병합은 `--merge` 작업에서만 |
+| `dev` (기본) | 추가 deny 없음: issue, 브랜치 push, `gh pr create` 가능. 병합은 `--merge` 작업에서만. Rust 검사 훅(`rust-check`) |
 | `marketing` | `git push`, `git remote add/set-url`, 데이터를 바꾸는 `curl`(`-X POST` 등, `-d`, `-F`)·`wget` deny |
 
 | 훅 (`image/hooks/`, 이미지 `/usr/local/lib/agent-hub/hooks/`) | 동작 |
@@ -171,6 +174,8 @@
 | `guard` (PreToolUse) | ① 경로·명령에 `.env` 이름이 있으면 거부, `.env.example`만 허용 ② 파일 도구(Write·Edit) 쓰기는 프로젝트 폴더, `/tmp`, Claude 프로젝트 메모리만 ③ `.claude/settings.json`·`settings.local.json` 쓰기 거부(파일 도구와 셸 쓰기 모두) ④ `git commit` 전 커밋될 내용에서 토큰(`sk-ant-`, `ghp_`, `github_pat_`, AWS·Slack·Google 키)·개인키 블록을 찾으면 거부(값은 안 보여 줌) ⑤ `gh pr merge`, `pulls/<n>/merge` API, 기본 브랜치(main·master·origin HEAD)에서의 commit·`git merge`(원격 없는 저장소의 병합 경로), 그쪽으로의 push·`--all`은 `AGENT_HUB_ALLOW_MERGE=1`(`proj task --merge`)일 때만 |
 | `worklog` (Stop) | 최근 1시간 안에 바뀐 파일이 있는데 `log/YYYY-MM.md`가 그 뒤에 안 바뀌었으면 한 번 막고 표에 한 행을 요청 (아래 "작업 기록") |
 | `worklog recent` (SessionStart) | 가장 최근 `log/YYYY-MM.md`의 마지막 5행을 맥락으로 넣음 |
+| `rust-check edit` (PostToolUse, dev) | Edit·Write·MultiEdit로 `.rs`에 쓴 새 텍스트에서 SQL 상태 문자열(`status = 'PENDING'`, `IN ('PAID', …)` 등)을 찾으면 바로 알림(enum + 바인딩 파라미터로). 기존 코드는 보지 않음 |
+| `rust-check stop` (Stop, dev) | 최근 1시간 안에 `.rs`가 바뀌었으면 `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`. 실패하면 한 번 막고 고치게 함(변경 전부터 있던 실패는 보고만). `Cargo.toml` 없는 저장소·cargo 없는 이미지는 통과, 워크스페이스 루트면 한 단계 아래 저장소. `.sqlx`가 있고 `DATABASE_URL`이 없으면 `SQLX_OFFLINE=true`. 제한 시간 900초 |
 
 - 작업은 `bypassPermissions`로 돌므로 allow·ask 규칙은 효과가 없다. 막는 것은 deny와 훅뿐.
 - 훅은 문자열 검사라 셸로 우회할 수 있다. 병합을 확실히 막으려면 GitHub 저장소에서 main 브랜치 보호를 켠다. 폴더 경계(②)도 파일 도구만 막는다.

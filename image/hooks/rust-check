@@ -1,0 +1,44 @@
+#!/bin/sh
+# Rust checks for project agents (image/settings/dev.json). Rules live in harness docs/rust/CODE_STYLE.md.
+#   rust-check edit  PostToolUse (Edit|MultiEdit|Write): status strings hard-coded in SQL in the text just written to a
+#                    .rs file ('PENDING' …) → tell the agent at once. Only the new text, so old code does not nag.
+#   rust-check stop  Stop: when .rs files changed in the last hour, cargo fmt --check and
+#                    cargo clippy --workspace --all-targets -D warnings; on failure block the stop once with the output.
+# Repos without Cargo.toml, and images without cargo, pass straight through.
+mode="${1:-stop}"
+in="$(cat)"
+
+if [ "$mode" = edit ]; then
+  f="$(printf '%s' "$in" | jq -r '.tool_input.file_path // empty' 2>/dev/null)"
+  case "$f" in *.rs) ;; *) exit 0 ;; esac
+  text="$(printf '%s' "$in" | jq -r '.tool_input | [.new_string, .content, (.edits // [] | .[].new_string)] | map(strings) | join("\n")')"
+  # A column such as status/state/kind/type compared with a quoted word: the value belongs in an enum bound as a parameter.
+  hits="$(printf '%s\n' "$text" | grep -nEi "[a-z_]*(status|state|kind|type)[[:space:]]*(=|!=|<>|in[[:space:]]*\()[[:space:]]*'[A-Za-z_]+'" | head -5)"
+  [ -n "$hits" ] || exit 0
+  jq -nc --arg f "$f" --arg h "$hits" '{decision: "block", reason: ("Status strings are hard-coded in SQL in " + $f + ":\n" + $h + "\nUse the domain enum (sqlx::Type) and pass it as a bind parameter ($1 / .bind(Status::Pending)); see the harness Rust CODE_STYLE constants rules.")}'
+  exit 0
+fi
+
+[ "$(printf '%s' "$in" | jq -r '.stop_hook_active // false' 2>/dev/null)" = false ] || exit 0
+command -v cargo >/dev/null 2>&1 || exit 0
+cwd="$(printf '%s' "$in" | jq -r '.cwd // empty')"
+[ -d "$cwd" ] || exit 0
+top="$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null || echo "$cwd")"
+# The repo itself, or (workspace root) its repos one level down.
+if [ -f "$top/Cargo.toml" ]; then dirs="$top"; else dirs="$(ls -d "$top"/*/Cargo.toml 2>/dev/null | sed 's|/Cargo.toml$||')"; fi
+out=""
+for d in $dirs; do
+  [ -n "$(find "$d" \( -name target -o -name .git -o -name .worktrees -o -name node_modules \) -prune -o -name '*.rs' -type f -mmin -60 -print 2>/dev/null | head -1)" ] || continue
+  # sqlx macros need a database or the committed offline data.
+  [ -n "${DATABASE_URL:-}" ] || [ ! -d "$d/.sqlx" ] || export SQLX_OFFLINE=true
+  r="$(cd "$d" && { cargo fmt --check 2>&1 | head -30; } )"
+  [ -z "$r" ] || out="$out
+== cargo fmt --check in $d (run cargo fmt):
+$r"
+  r="$(cd "$d" && CARGO_TERM_COLOR=never cargo clippy --quiet --workspace --all-targets -- -D warnings 2>&1)" \
+    || out="$out
+== cargo clippy --workspace --all-targets -- -D warnings in $d:
+$(printf '%s\n' "$r" | grep -v '^ *Compiling\|^ *Checking' | head -60)"
+done
+[ -n "$out" ] || exit 0
+jq -nc --arg o "$out" '{decision: "block", reason: ("Rust checks failed. Fix what your change caused, then finish. If a failure was already there before your change, leave it and say so in your report." + $o)}'

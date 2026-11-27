@@ -129,4 +129,33 @@ check "recent: newest last" yes "$(recent "$r" | tail -1 | grep -q 'row 7' && ec
 check "recent: no header" 0 "$(recent "$r" | grep -c '작업내용')"
 check "recent: no log, no output" "" "$(recent "$m")"
 
+# Rust checks (dev profile): SQL status literals in new .rs text at once; fmt and clippy when the agent stops.
+rc_edit() { jq -nc --arg f "$1" --arg s "$2" '{tool_name: "Edit", tool_input: {file_path: $f, new_string: $s}}' | "$H/rust-check" edit; }
+check "rust: status literal in SQL" block "$(rc_edit /w/src/order.rs "sqlx::query(\"SELECT id FROM orders WHERE status = 'PENDING'\")" | jq -r .decision)"
+check "rust: IN list literal" block "$(rc_edit /w/src/order.rs "WHERE o.order_status IN ('PAID', 'SHIPPED')" | jq -r .decision)"
+check "rust: bind parameter passes" "" "$(rc_edit /w/src/order.rs 'WHERE status = $1')"
+check "rust: other files pass" "" "$(rc_edit /w/db/seed.sql "WHERE status = 'PENDING'")"
+check "rust: Write content checked" block "$(jq -nc '{tool_name: "Write", tool_input: {file_path: "/w/a.rs", content: "WHERE kind = '"'"'refund'"'"'"}}' | "$H/rust-check" edit | jq -r .decision)"
+check "rust: MultiEdit checked" block "$(jq -nc '{tool_name: "MultiEdit", tool_input: {file_path: "/w/a.rs", edits: [{new_string: "x"}, {new_string: "AND state <> '"'"'DONE'"'"'"}]}}' | "$H/rust-check" edit | jq -r .decision)"
+rc_stop() { jq -nc --arg c "$1" --argjson a "${2:-false}" '{cwd: $c, stop_hook_active: $a}' | "$H/rust-check" stop; }
+check "rust stop: no Cargo.toml passes" "" "$(rc_stop "$r")"
+if command -v cargo >/dev/null 2>&1; then
+  c="$T/crate"; mkdir -p "$c/src"; git init -q -b main "$c"
+  printf '[package]\nname = "hk"\nversion = "0.1.0"\nedition = "2021"\n' > "$c/Cargo.toml"
+  printf 'fn main() {\n    let v = vec![1];\n    let n = v.len() == 0;\n    println!("{n}");\n}\n' > "$c/src/main.rs"
+  check "rust stop: clippy warning blocks" block "$(rc_stop "$c" | jq -r .decision)"
+  check "rust stop: names the lint" yes "$(rc_stop "$c" | jq -r .reason | grep -q len_zero && echo yes || echo no)"
+  check "rust stop: second stop passes" "" "$(rc_stop "$c" true)"
+  printf 'fn main() {\n    println!("ok");\n}\n' > "$c/src/main.rs"
+  check "rust stop: clean crate passes" "" "$(rc_stop "$c")"
+  printf 'fn main(){println!("x");}\n' > "$c/src/main.rs"
+  check "rust stop: fmt blocks" yes "$(rc_stop "$c" | jq -r .reason | grep -q 'cargo fmt --check' && echo yes || echo no)"
+  touch -t 202001010000 "$c/src/main.rs"
+  check "rust stop: no recent .rs change passes" "" "$(rc_stop "$c")"
+  w2="$T/ws2"; mkdir -p "$w2"; cp -R "$c" "$w2/api"; touch "$w2/api/src/main.rs"
+  check "rust stop: workspace root checks repos below" yes "$(rc_stop "$w2" | jq -r .reason | grep -q "$w2/api" && echo yes || echo no)"
+else
+  echo "skip rust stop checks: no cargo"
+fi
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

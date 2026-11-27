@@ -90,6 +90,7 @@ Mac mini
 | 2026-11-25 | 프론트엔드용 Playwright: `base` 이미지에 Playwright MCP와 Chromium·시스템 라이브러리(rust도 상속). 에이전트 브라우저는 headless·isolated MCP (#25) | 사용자 요청, 별도 이미지 대신 base |
 | 2026-11-27 | 참고 저장소: `$WORKSPACE_ROOT/refs/<repo>` 전용 clone을 연결한 프로젝트 컨테이너에만 `/refs/<repo>` 읽기 전용으로. `proj task`·`reply` 직전 호스트에서 pull(실패해도 진행), 안내는 워크스페이스 CLAUDE.md (#30) | 참고용 코드를 에이전트가 고치지 않게, 작업 브랜치와 부딪히지 않게, 다른 계정 프로젝트에 안 보이게 (사용자 결정) |
 | 2026-11-27 | 이미지를 개발 환경별로 나눔: `base` / `web`(Playwright) / `rust`(+ rust-analyzer, LSP 플러그인 자동) / `rust-web`. `Cargo.toml`·`package.json`으로 자동 선택, 마케팅은 `base`. #25의 base 포함 결정을 바꿈 (#29) | Rust 컨테이너에 브라우저(약 1.1GB)가 필요 없고, 프론트에는 rust가 필요 없음 (사용자 결정) |
+| 2026-11-27 | Rust 검사는 개발 프로필 훅(`rust-check`): 수정 직후 SQL 상태 문자열, 작업 끝에 fmt·clippy(`--workspace`, 한 번만 막음). ponytail audit은 리팩토링 때만, 지도 길이는 늘리지 않음 (#28) | 규칙을 CLAUDE.md에 길게 적지 않고 작업 중에 강제. 마케팅 프로필에는 불필요 (사용자 결정) |
 
 ## 단계
 

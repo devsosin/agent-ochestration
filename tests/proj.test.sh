@@ -255,11 +255,14 @@ check "profile: common env deny" yes "$(jq -e '.permissions.deny | index("Read(/
 check "profile: guard hook" yes "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$s" | grep -q hooks/guard && echo yes || echo no)"
 check "profile: work log hook" yes "$(jq -r '.hooks.Stop[0].hooks[0].command' "$s" | grep -q hooks/worklog && echo yes || echo no)"
 check "profile: dev does not deny push" no "$(jq -e '.permissions.deny | index("Bash(git push*)")' "$s" >/dev/null && echo yes || echo no)"
+check "profile: dev has the Rust stop check" yes "$(jq -r '.hooks.Stop[].hooks[].command' "$s" | grep -q 'rust-check stop' && echo yes || echo no)"
+check "profile: dev has the Rust edit check" yes "$(jq -r '.hooks.PostToolUse[].hooks[].command' "$s" | grep -q 'rust-check edit' && echo yes || echo no)"
 check "profile: harness plugin kept" true "$(jq -r '.enabledPlugins["harness@devsosin-harness"]' "$s")"
 write_settings prof '.env.FOO = "1"'
 cmd_profile prof marketing >/dev/null
 check "profile: switched" marketing "$(project_var prof PROFILE)"
 check "profile: marketing denies push" yes "$(jq -e '.permissions.deny | index("Bash(git push*)")' "$s" >/dev/null && echo yes || echo no)"
+check "profile: marketing has no Rust checks" no "$(jq -r '[.hooks[][].hooks[].command] | join(" ")' "$s" | grep -q rust-check && echo yes || echo no)"
 check "profile: common deny kept" yes "$(jq -e '.permissions.deny | index("Read(//**/.env)")' "$s" >/dev/null && echo yes || echo no)"
 check "profile: env kept on switch" 1 "$(jq -r .env.FOO "$s")"
 check "profile: hooks not doubled" 1 "$(jq '.hooks.PreToolUse | length' "$s")"
