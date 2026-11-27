@@ -24,6 +24,9 @@
 | `proj alias <name> <별칭>` | 메인 에이전트가 알아듣는 이름 지정 (예: `스모크`). `proj new --alias`로도 지정 |
 | `proj ref add <name> <owner/repo\|URL>` / `rm <name> <repo>` | 참고 저장소를 `$WORKSPACE_ROOT/refs/<repo>`에 clone(있으면 재사용)하고 그 프로젝트 컨테이너 `/refs/<repo>`에 읽기 전용 마운트 / 마운트 해제(clone은 남김). 컨테이너를 다시 만들므로 실행 중 작업이 있으면 거부 (아래 "참고 저장소") |
 | `proj ref ls [name]` / `update [repo]` | clone 목록(마지막 커밋, 쓰는 프로젝트) 또는 그 프로젝트의 참고 저장소 / 호스트에서 `git pull --ff-only` |
+| `proj knowledge build` / `up` / `down` / `status` / `update` | 지식 저장소(`KNOWLEDGE_REPO`)를 `refs/`에 clone하고 서버 이미지 빌드 / 서버 기동·중지 / 상태와 켠 프로젝트 / 호스트 pull 후 인덱스 재빌드 (아래 "지식") |
+| `proj knowledge <name> on [--max internal\|confidential] [--propose]` / `off` / `rotate` | 그 프로젝트에 knowledge 켜기(토큰 발급, 기본 `internal`) / 끄기(토큰 폐기) / 토큰 교체. 실행 중 작업이 있으면 거부 |
+| `proj knowledge github-token` | 서버용 GitHub 토큰(지식 저장소 하나에 contents·PR 쓰기) 입력. 터미널에서 사용자만 |
 | `proj ls` | 프로젝트, 계정, 컨테이너 상태, 실행 중 작업 수, 별칭 |
 | `proj up` / `down` / `shell <name>` | 시작 / 중지(컨테이너 삭제, 볼륨 유지. 에이전트가 띄운 컨테이너는 멈추기만) / 컨테이너 셸 |
 | `proj rm <name> [--purge] [--yes]` | 컨테이너와 Claude 설정 볼륨, 에이전트가 띄운 컨테이너·네트워크·볼륨(라벨 `agent-hub.project=<name>`, DB 데이터 포함) 삭제, 폴더·작업 기록은 남김. `--purge`는 폴더·작업 기록·대화 기록(`sessions/<name>`)까지 삭제하되 커밋 안 된 변경이나 원격에 없는 커밋이 있으면 거부. 확인은 터미널에서 직접 답하거나 `--yes` (파이프로 넣은 `y`는 거부) |
@@ -145,6 +148,24 @@
 | 이름 | 프로젝트 이름 `refs`는 쓸 수 없음(같은 폴더) |
 | clone 삭제 | 자동으로 지우지 않음. `proj ref ls`에서 쓰는 프로젝트가 없으면 폴더를 지움 |
 
+## 지식 (knowledge MCP)
+
+정책·환불 정보 같은 사실을 프로젝트 에이전트가 MCP로 확인한다. 서버는 지식 저장소(`KNOWLEDGE_REPO`)에서 나오고, agent-hub는 연결·토큰·수명주기만 맡는다.
+
+| 항목 | 내용 |
+|---|---|
+| 준비 | `~/.agent-hub/config`에 `KNOWLEDGE_REPO=<owner/repo>` → `proj knowledge build`(`refs/<repo>`에 clone, 그 저장소의 `Dockerfile`로 `agent-hub:knowledge-mcp`. `KNOWLEDGE_DOCKERFILE`로 바꿀 수 있음) → `proj knowledge <name> on` (서버가 없으면 같이 띄움) |
+| 서버 | 컨테이너 `knowledge-mcp`(`compose/knowledge.yml`, `restart: unless-stopped`, 512m). 호스트 포트 없음. 지식 checkout `:ro`, `~/.agent-hub/knowledge/db`는 쓰기(ETL 결과와 서버 인덱스 `index.sqlite`), 설정 `mcp.config.json` `:ro`, `/tmp` tmpfs. 상태 확인 `/healthz` |
+| 네트워크 | 켠 프로젝트의 `proj-<name>_default`에만 연결(`dc up` 때마다 다시). 끈 프로젝트에서는 `knowledge-mcp` 이름을 찾지 못함. 프로젝트끼리는 분리 그대로 |
+| 토큰 | 프로젝트마다 `~/.agent-hub/projects/<name>.knowledge.token`(0600) → secret `/run/secrets/knowledge_token` → `KNOWLEDGE_TOKEN` → `mcp.json`의 `Authorization: Bearer ${KNOWLEDGE_TOKEN}`. 서버 설정은 `proj`가 서버 형식(camelCase, `proposal` 포함)으로 다시 씀. 지금은 원문 토큰(0600), 서버가 `tokenSha256`을 읽게 되면 해시로 |
+| 범위 | space `ops`, 최대 sensitivity 기본 `internal`. `--max confidential`은 사용자가 채팅에서 "응"한 뒤에만 |
+| 쓰기 | `--propose`인 프로젝트만 `propose_update` 도구(서버가 지식 저장소에 `kh/propose-*` PR을 열고 병합은 사용자, 시간당 5건). 서버용 GitHub 토큰은 `proj knowledge github-token`, 서버 컨테이너에만 |
+| 갱신 | knowledge를 켠 프로젝트의 `proj task`·`reply` 직전과 `proj knowledge update`에서 호스트가 pull, 바뀌었으면 서버에 SIGHUP(인덱스 재빌드, 실패하면 이전 인덱스 유지) |
+| `db/` | 운영 DB ETL 결과. 민감한 환경변수 때문에 사용자가 호스트에서 직접 실행 |
+| MCP가 꺼진 프로젝트 | `mcp.json`의 `knowledge` 항목은 연결 실패로만 보임(imagegen이 꺼졌을 때와 같음) |
+| 위험 | 기밀 사실을 받는 컨테이너가 외부 페이지(Playwright)를 읽고 GitHub에 push할 수 있으면 프롬프트 인젝션으로 새는 경로가 된다. `confidential` 프로젝트는 외부 탐색을 지시하지 않는다 |
+| 반영 | `proj build`(이미지의 `mcp.json`·`profile.sh`) 후 프로젝트마다 `proj up <name>`(새 secret) |
+
 ## 플러그인
 
 | 항목 | 내용 |
@@ -220,6 +241,8 @@
 | `USAGE_MAX` | `0.95` (계정의 5시간·7일 한도 중 하나라도 넘으면 새 작업 거부) | 〃 |
 | `IDLE_HOURS` | `3` (`proj idle` 기본값) | 〃 |
 | `USAGE_STALE` | `1800` (작업 시작 시 사용량 값이 이보다 오래됐으면 먼저 짧은 요청으로 갱신, 초) | 〃 |
+| `KNOWLEDGE_REPO` | 없음 (`owner/repo`, `proj knowledge`) | `~/.agent-hub/config` |
+| `KNOWLEDGE_DOCKERFILE` | `$WORKSPACE_ROOT/refs/<repo>/Dockerfile` | 〃 |
 | `AGENT_HUB_HOME` | `~/.agent-hub` | 환경변수 (계정 토큰이 있으므로 동기화 폴더에 두지 않는다) |
 
 플러그인: `~/.agent-hub/plugins/<marketplace>/`, 프로젝트별 설정 `~/.agent-hub/projects/<name>.managed-settings.json` (`proj rm`이 함께 삭제).

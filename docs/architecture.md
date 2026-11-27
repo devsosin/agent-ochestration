@@ -36,6 +36,7 @@ Mac mini
 | OpenAI(Codex) 로그인 | 넣지 않음 | 호스트 imagegen MCP만 사용. 컨테이너는 이미지 URL만 받음 |
 | 플러그인 코드·managed settings | 읽기 전용 마운트 | 플러그인 hook은 컨테이너에서 코드를 실행하므로 코드는 호스트에서만 바뀜(`proj plugin source add`·`update`). 켜는 플러그인과 옵션도 호스트 파일이라 에이전트가 바꿀 수 없음. 마켓플레이스 폴더는 모든 프로젝트에 보이지만 켜진 것만 로드됨 |
 | 권한 모드 | `bypassPermissions` (non-root) | 컨테이너가 경계. 네트워크 송신 제한은 아직 없음 (TBD) |
+| knowledge MCP | 켠 프로젝트에만: 서버가 그 프로젝트 네트워크에 연결되고, 프로젝트별 토큰(secret)이 최대 sensitivity를 정함. 서버용 GitHub 토큰은 서버 컨테이너에만 | 끈 프로젝트는 서버 이름조차 못 찾음. 프로젝트끼리는 계속 분리. `confidential`은 사용자 확인 후에만 ([proj.md](proj.md) "지식 (knowledge MCP)") |
 | 권한·훅 프로필 | managed settings(읽기 전용)에 공통 + 팀(`dev`·`marketing`) deny와 훅 | `.env` 차단(`.env.example`만), 병합은 `--merge` 작업만. 훅은 문자열 검사라 GitHub 브랜치 보호가 최종 차단 ([proj.md](proj.md) "권한·훅 프로필") |
 
 ### Docker 프록시 규칙 (`dockerproxy/server.py`)
@@ -91,6 +92,7 @@ Mac mini
 | 2026-11-27 | 참고 저장소: `$WORKSPACE_ROOT/refs/<repo>` 전용 clone을 연결한 프로젝트 컨테이너에만 `/refs/<repo>` 읽기 전용으로. `proj task`·`reply` 직전 호스트에서 pull(실패해도 진행), 안내는 워크스페이스 CLAUDE.md (#30) | 참고용 코드를 에이전트가 고치지 않게, 작업 브랜치와 부딪히지 않게, 다른 계정 프로젝트에 안 보이게 (사용자 결정) |
 | 2026-11-27 | 이미지를 개발 환경별로 나눔: `base` / `web`(Playwright) / `rust`(+ rust-analyzer, LSP 플러그인 자동) / `rust-web`. `Cargo.toml`·`package.json`으로 자동 선택, 마케팅은 `base`. #25의 base 포함 결정을 바꿈 (#29) | Rust 컨테이너에 브라우저(약 1.1GB)가 필요 없고, 프론트에는 rust가 필요 없음 (사용자 결정) |
 | 2026-11-27 | Rust 검사는 개발 프로필 훅(`rust-check`): 수정 직후 SQL 상태 문자열, 작업 끝에 fmt·clippy(`--workspace`, 한 번만 막음). ponytail audit은 리팩토링 때만, 지도 길이는 늘리지 않음 (#28) | 규칙을 CLAUDE.md에 길게 적지 않고 작업 중에 강제. 마케팅 프로필에는 불필요 (사용자 결정) |
+| 2026-11-27 | knowledge MCP: 공유 네트워크 대신 켠 프로젝트 네트워크에만 서버 연결, 프로젝트별 토큰 → 최대 sensitivity(기본 `internal`, `confidential`은 사용자 확인), 쓰기는 `propose_update` PR만, 서버 수명주기는 `proj knowledge`, 지식 저장소는 `refs/` clone (#34) | 계정·프로젝트 경계 유지, 사실 변경은 항상 사용자 리뷰 (사용자 결정) |
 
 ## 단계
 
