@@ -53,6 +53,8 @@ dc() { # dc <name> <compose args...>
   # The knowledge secret must exist even while knowledge is off (empty token).
   export KNOWLEDGE_TOKEN_FILE; KNOWLEDGE_TOKEN_FILE="$(knowledge_token_file "$name")"
   ( umask 077; [ -f "$KNOWLEDGE_TOKEN_FILE" ] || : > "$KNOWLEDGE_TOKEN_FILE" )
+  # The knowledge server holds an endpoint on the project network, which would keep compose from removing it.
+  case " $* " in *" down "*) ! knowledge_running || docker network disconnect "$(compose_name "$name")_default" "$KNOWLEDGE_CTR" >/dev/null 2>&1 || true ;; esac
   # Shell env beats --env-file, so projects made before these variables existed get them too.
   MANAGED_SETTINGS="$(settings_file "$name")" PLUGINS_DIR="$PLUGINS_DIR" \
     docker compose -p "$(compose_name "$name")" --env-file "$(env_file "$name")" -f "$COMPOSE_FILE" ${refs:+-f "$refs"} "$@" || rc=$?
@@ -449,9 +451,9 @@ ref_update() { # ref_update [repo]: pulls one clone or all of them
 
 # --- knowledge MCP (proj knowledge) -------------------------------------------
 # One server container (compose/knowledge.yml) reads the knowledge repo, cloned like a reference repo into $REFS_DIR and
-# pulled on the host. It joins only the networks of projects with knowledge on, so projects stay apart. Each such
-# project has its own token (a compose secret → KNOWLEDGE_TOKEN → mcp.json) mapped to its spaces and highest
-# sensitivity in the server's config, which bin/proj writes.
+# pulled on the host; the server re-indexes by itself when the files change. It joins only the networks of projects with
+# knowledge on, so projects stay apart. Each such project has its own token (a compose secret → KNOWLEDGE_TOKEN →
+# mcp.json) mapped to its spaces and highest sensitivity in the server's config, which bin/proj writes with hashes only.
 
 knowledge_token_file() { printf '%s/projects/%s.knowledge.token' "$HUB" "$1"; }
 knowledge_src() {
@@ -467,27 +469,31 @@ knowledge_projects() { # names of projects with knowledge on
   done
 }
 
+token_sha256() { # token_sha256 <file>: sha256 hex of the token in the file (without its newline)
+  printf '%s' "$(cat "$1")" | shasum -a 256 | cut -d' ' -f1
+}
+
 knowledge_config() { # writes the server's config (its own format) from the projects with knowledge on
   local f="$KNOWLEDGE_DIR/mcp.config.json" name clients="" tmp
   mkdir -p "$KNOWLEDGE_DIR"
   for name in $(knowledge_projects); do
     [ -s "$(knowledge_token_file "$name")" ] || continue
-    # shortcut: plain tokens (file mode 600) until the server reads tokenSha256 (knowledge repo issue #19); then hash here.
-    clients="$clients$(jq -nc --arg n "$name" --rawfile t "$(knowledge_token_file "$name")" \
+    clients="$clients$(jq -nc --arg n "$name" --arg h "$(token_sha256 "$(knowledge_token_file "$name")")" \
       --arg m "$(project_var "$name" KNOWLEDGE)" --arg p "$(project_var "$name" KNOWLEDGE_PROPOSE)" \
-      '{name: $n, token: ($t | rtrimstr("\n")), spaces: ["ops"], maxSensitivity: $m, propose: ($p == "1")}')
+      '{name: $n, tokenSha256: $h, spaces: ["ops"], maxSensitivity: $m, propose: ($p == "1")}')
 "
   done
   tmp="$(printf '%s' "$clients" | jq -s --arg r "${KNOWLEDGE_REPO:-}" \
     '{bind: "0.0.0.0", port: 8787, proposal: {repo: $r, tokenEnv: "KNOWLEDGE_GITHUB_TOKEN", maxPerHour: 5}, clients: .}')"
-  ( umask 077; [ -f "$f" ] || : > "$f" )
+  # Hashes only, so it may be world-readable: the server runs as uid 10001, not the host user.
+  [ -f "$f" ] || { : > "$f"; chmod 644 "$f"; }
   printf '%s\n' "$tmp" > "$f"   # in place: the container's single-file bind mount keeps the old inode
 }
 
 kdc() { # kdc <compose args...>: the knowledge server's compose project
   local src; src="$(knowledge_src)"
   [ -d "$src/.git" ] || die "no knowledge checkout at $(tilde "$src") (proj knowledge build clones it)"
-  mkdir -p "$KNOWLEDGE_DIR/db" "$src/db"   # db/ is gitignored there; the mount point must exist before the read-only mount
+  mkdir -p "$KNOWLEDGE_DIR/db"
   ( umask 077; [ -f "$KNOWLEDGE_DIR/github.token" ] || : > "$KNOWLEDGE_DIR/github.token" )
   knowledge_config
   KNOWLEDGE_SRC="$src" KNOWLEDGE_DIR="$KNOWLEDGE_DIR" \
@@ -512,15 +518,11 @@ knowledge_up() { # starts the server (when a project has knowledge on) and joins
 }
 
 knowledge_ready() { # knowledge_ready <name>: before a task run; problems only warn, the task still runs
-  local src before
+  local src
   [ -n "$(project_var "$1" KNOWLEDGE 2>/dev/null || true)" ] || return 0
   src="$(knowledge_src 2>/dev/null)" && [ -d "$src/.git" ] || { echo "proj: warning: knowledge is on for $1 but there is no checkout (proj knowledge build)" >&2; return 0; }
-  before="$(git -C "$src" rev-parse HEAD 2>/dev/null)"
-  pull_ref "$(basename "$src")" || true
-  if knowledge_running; then
-    # The server rebuilds its index on SIGHUP (a failed rebuild keeps the old one).
-    [ "$(git -C "$src" rev-parse HEAD 2>/dev/null)" = "$before" ] || docker kill -s HUP "$KNOWLEDGE_CTR" >/dev/null 2>&1 || true
-  else
+  pull_ref "$(basename "$src")" || true   # the server re-indexes on its next request when files under spaces/ changed
+  if ! knowledge_running; then
     (knowledge_up) >/dev/null 2>&1 || echo "proj: warning: knowledge server did not start (proj knowledge status)" >&2   # die must not end the task
   fi
   knowledge_attach "$1"
@@ -568,9 +570,12 @@ knowledge_set() { # knowledge_set <name> on|off|rotate [--max internal|confident
 }
 
 knowledge_status() {
-  local name state
+  local name state health=""
   state="$(docker inspect -f '{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$KNOWLEDGE_CTR" 2>/dev/null)" || state=absent
+  # /healthz: index build time, fact count, rebuild_error when new files failed validation (the old index still serves).
+  ! knowledge_running || health="$(docker exec "$KNOWLEDGE_CTR" node -e "fetch('http://127.0.0.1:8787/healthz').then(r => r.text()).then(t => console.log(t), () => {})" 2>/dev/null || true)"
   echo "server: $state (repo ${KNOWLEDGE_REPO:-not set}, checkout $(git -C "$(knowledge_src 2>/dev/null || echo /nonexistent)" log -1 --format='%h %cs' 2>/dev/null || echo none))"
+  [ -z "$health" ] || echo "index: $health"
   printf '%-24s %-13s %s\n' PROJECT SENSITIVITY PROPOSE
   for name in $(knowledge_projects); do
     printf '%-24s %-13s %s\n' "$name" "$(project_var "$name" KNOWLEDGE)" "$([ -n "$(project_var "$name" KNOWLEDGE_PROPOSE)" ] && echo yes || echo no)"
@@ -602,10 +607,9 @@ cmd_knowledge() { # proj knowledge build|up|down|status|update|github-token | <n
     up) knowledge_up; knowledge_status ;;
     down) kdc down ;;
     status) knowledge_status ;;
-    update)
-      local src before; src="$(knowledge_src)"; before="$(git -C "$src" rev-parse HEAD)"
-      pull_ref "$(basename "$src")" && echo "$(basename "$src"): $(git -C "$src" log -1 --format='%h %s')"
-      [ "$(git -C "$src" rev-parse HEAD)" = "$before" ] || ! knowledge_running || docker kill -s HUP "$KNOWLEDGE_CTR" >/dev/null ;;
+    update)   # the server re-indexes on its next request
+      local src; src="$(knowledge_src)"
+      pull_ref "$(basename "$src")" && echo "$(basename "$src"): $(git -C "$src" log -1 --format='%h %s')" ;;
     github-token) knowledge_github_token ;;
     *)
       local name="$1"; require_project "$name"

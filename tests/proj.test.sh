@@ -358,10 +358,12 @@ knowledge_set kp on >/dev/null
 tok="$(cat "$(knowledge_token_file kp)")"
 check "knowledge on: 48 hex token" yes "$(printf '%s' "$tok" | grep -qE '^[0-9a-f]{48}$' && echo yes || echo no)"
 check "knowledge on: token file is 600" "-rw-------" "$(ls -l "$(knowledge_token_file kp)" | cut -c1-10)"
-check "knowledge on: config file is 600" "-rw-------" "$(ls -l "$kcfg" | cut -c1-10)"
+check "knowledge on: config readable by the server (hashes only)" "-rw-r--r--" "$(ls -l "$kcfg" | cut -c1-10)"
 check "knowledge on: internal by default" internal "$(project_var kp KNOWLEDGE)"
 check "config: client in server format" "kp internal false ops" "$(jq -r '.clients[0] | "\(.name) \(.maxSensitivity) \(.propose) \(.spaces[0])"' "$kcfg")"
-check "config: token matches the project secret" "$tok" "$(jq -r '.clients[0].token' "$kcfg")"
+check "config: sha256 of the project token" "$(printf '%s' "$tok" | shasum -a 256 | cut -d' ' -f1)" "$(jq -r '.clients[0].tokenSha256' "$kcfg")"
+check "config: no plain token" null "$(jq -r '.clients[0].token' "$kcfg")"
+check "config: token not in the file" 0 "$(grep -c "$tok" "$kcfg" || true)"
 check "config: proposal section always there" "o/knowledge KNOWLEDGE_GITHUB_TOKEN 5" "$(jq -r '.proposal | "\(.repo) \(.tokenEnv) \(.maxPerHour)"' "$kcfg")"
 check "config: listens inside the container" "0.0.0.0 8787" "$(jq -r '"\(.bind) \(.port)"' "$kcfg")"
 check "config: project without knowledge left out" 1 "$(jq '.clients | length' "$kcfg")"
@@ -371,7 +373,7 @@ check "on again: token kept" "$tok" "$(cat "$(knowledge_token_file kp)")"
 check "bad --max refused" "internal or confidential" "$( (knowledge_set kp on --max secret) 2>&1 | grep -o 'internal or confidential')"
 knowledge_set kp rotate >/dev/null
 check "rotate: new token" no "$([ "$(cat "$(knowledge_token_file kp)")" = "$tok" ] && echo yes || echo no)"
-check "rotate: config follows" "$(cat "$(knowledge_token_file kp)")" "$(jq -r '.clients[0].token' "$kcfg")"
+check "rotate: config follows" "$(token_sha256 "$(knowledge_token_file kp)")" "$(jq -r '.clients[0].tokenSha256' "$kcfg")"
 check "rotate refused while off" "knowledge is off" "$( (knowledge_set kq rotate) 2>&1 | grep -o 'knowledge is off')"
 check "refused while a task runs" "running tasks" "$( (running_tasks() { echo t; }; knowledge_set kp off) 2>&1 | grep -o 'running tasks')"
 knowledge_set kq on >/dev/null
@@ -388,6 +390,8 @@ check "off: leaves the project network" 1 "$(grep -c '^network disconnect proj-k
 : > "$dlog"; ensure_settings kp
 dc kp up -d >/dev/null
 check "dc up joins the server again" 1 "$(grep -c '^network connect proj-kp_default knowledge-mcp$' "$dlog")"
+: > "$dlog"; dc kp down >/dev/null
+check "dc down detaches the server first" "network disconnect proj-kp_default knowledge-mcp" "$(grep -v '^inspect' "$dlog" | head -1)"
 printf 'PROJECT_NAME=kn\nPROJECT_DIR=/w/kn\n' > "$(env_file kn)"; ensure_settings kn
 dc kn up -d >/dev/null
 check "dc makes an empty secret for projects without knowledge" "-rw------- 0" "$(ls -l "$(knowledge_token_file kn)" | awk '{print substr($1, 1, 10), $5}')"

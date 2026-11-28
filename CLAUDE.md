@@ -49,7 +49,7 @@ Runtime state lives outside the repo (never commit it):
 | `~/.claude-<alias>/` | host Claude config per account (full login, used by the hub) |
 | `~/workspace/<name>/` (`WORKSPACE_ROOT`) | project checkout (tasks run here on `agent/<id>`); `--worktree` tasks in `.worktrees/<id>/` |
 | `~/workspace/refs/<repo>/` | reference repo clones (`proj ref`), pulled on the host before each task run; mounted read-only at `/refs/<repo>` only in projects listing them (`REFS` in `<name>.env`, compose override `<name>.refs.yml`) |
-| `~/.agent-hub/knowledge/` | knowledge MCP server config `mcp.config.json` (written by `proj`, 0600, holds project tokens), `github.token` (server's propose token), `db/` (ETL output, index) |
+| `~/.agent-hub/knowledge/` | knowledge MCP server config `mcp.config.json` (written by `proj`, token hashes only), `github.token` (server's propose token), `db/` (ETL output, index) |
 | `~/.agent-hub/projects/<name>.knowledge.token` | that project's knowledge token (compose secret; empty while off) |
 | `~/workspace/harness/` (`HARNESS_DIR`) | harness plugin source (`devsosin/harness`), mounted read-only |
 

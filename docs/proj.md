@@ -154,14 +154,14 @@
 
 | 항목 | 내용 |
 |---|---|
-| 준비 | `~/.agent-hub/config`에 `KNOWLEDGE_REPO=<owner/repo>` → `proj knowledge build`(`refs/<repo>`에 clone, 그 저장소의 `Dockerfile`로 `agent-hub:knowledge-mcp`. `KNOWLEDGE_DOCKERFILE`로 바꿀 수 있음) → `proj knowledge <name> on` (서버가 없으면 같이 띄움) |
-| 서버 | 컨테이너 `knowledge-mcp`(`compose/knowledge.yml`, `restart: unless-stopped`, 512m). 호스트 포트 없음. 지식 checkout `:ro`, `~/.agent-hub/knowledge/db`는 쓰기(ETL 결과와 서버 인덱스 `index.sqlite`), 설정 `mcp.config.json` `:ro`, `/tmp` tmpfs. 상태 확인 `/healthz` |
+| 준비 | `~/.agent-hub/config`에 `KNOWLEDGE_REPO=<owner/repo>` → `proj knowledge build`(`refs/<repo>`에 clone, 그 저장소의 `Dockerfile`로 `agent-hub:knowledge-mcp`. `KNOWLEDGE_DOCKERFILE`로 바꿀 수 있음) → `proj knowledge <name> on` (서버가 없으면 같이 띄움). 서버 계약은 지식 저장소 `engine/mcp/README.md` "Container" |
+| 서버 | 컨테이너 `knowledge-mcp`(`compose/knowledge.yml`, uid 10001, 루트 파일시스템 읽기 전용, `restart: unless-stopped`, 512m). 호스트 포트 없음. 지식 checkout `/knowledge:ro`, `~/.agent-hub/knowledge/db` 폴더 → `/var/lib/knowledge/db:ro`(ETL 결과), 설정 `mcp.config.json:ro`, 인덱스는 named volume `knowledge-index`(`/var/lib/knowledge/index`, 서버가 쓰는 유일한 곳), `/tmp` tmpfs. 상태 `/healthz`(이미지 HEALTHCHECK) |
 | 네트워크 | 켠 프로젝트의 `proj-<name>_default`에만 연결(`dc up` 때마다 다시). 끈 프로젝트에서는 `knowledge-mcp` 이름을 찾지 못함. 프로젝트끼리는 분리 그대로 |
-| 토큰 | 프로젝트마다 `~/.agent-hub/projects/<name>.knowledge.token`(0600) → secret `/run/secrets/knowledge_token` → `KNOWLEDGE_TOKEN` → `mcp.json`의 `Authorization: Bearer ${KNOWLEDGE_TOKEN}`. 서버 설정은 `proj`가 서버 형식(camelCase, `proposal` 포함)으로 다시 씀. 지금은 원문 토큰(0600), 서버가 `tokenSha256`을 읽게 되면 해시로 |
+| 토큰 | 프로젝트마다 `~/.agent-hub/projects/<name>.knowledge.token`(0600) → secret `/run/secrets/knowledge_token` → `KNOWLEDGE_TOKEN` → `mcp.json`의 `Authorization: Bearer ${KNOWLEDGE_TOKEN}`. 서버 설정은 `proj`가 서버 형식(camelCase, `proposal` 포함)으로 다시 쓰고 `tokenSha256`만 담음(원문 없음, 서버 uid가 읽도록 0644) |
 | 범위 | space `ops`, 최대 sensitivity 기본 `internal`. `--max confidential`은 사용자가 채팅에서 "응"한 뒤에만 |
 | 쓰기 | `--propose`인 프로젝트만 `propose_update` 도구(서버가 지식 저장소에 `kh/propose-*` PR을 열고 병합은 사용자, 시간당 5건). 서버용 GitHub 토큰은 `proj knowledge github-token`, 서버 컨테이너에만 |
-| 갱신 | knowledge를 켠 프로젝트의 `proj task`·`reply` 직전과 `proj knowledge update`에서 호스트가 pull, 바뀌었으면 서버에 SIGHUP(인덱스 재빌드, 실패하면 이전 인덱스 유지) |
-| `db/` | 운영 DB ETL 결과. 민감한 환경변수 때문에 사용자가 호스트에서 직접 실행 |
+| 갱신 | knowledge를 켠 프로젝트의 `proj task`·`reply` 직전과 `proj knowledge update`에서 호스트가 pull. 서버가 다음 요청 때 `spaces/` 변경을 보고 스스로 재색인(재시작 없음). 새 파일이 검증에 실패하면 이전 인덱스를 계속 쓰고 `proj knowledge status`의 index 줄에 `rebuild_error` |
+| `db/` | 운영 DB ETL 결과(`analytics.sqlite`). 민감한 환경변수 때문에 사용자가 호스트에서 직접 실행하고 출력은 `KNOWLEDGE_ANALYTICS_DB=~/.agent-hub/knowledge/db/analytics.sqlite`. 파일을 rename으로 바꾸므로 폴더째 마운트 |
 | MCP가 꺼진 프로젝트 | `mcp.json`의 `knowledge` 항목은 연결 실패로만 보임(imagegen이 꺼졌을 때와 같음) |
 | 위험 | 기밀 사실을 받는 컨테이너가 외부 페이지(Playwright)를 읽고 GitHub에 push할 수 있으면 프롬프트 인젝션으로 새는 경로가 된다. `confidential` 프로젝트는 외부 탐색을 지시하지 않는다 |
 | 반영 | `proj build`(이미지의 `mcp.json`·`profile.sh`) 후 프로젝트마다 `proj up <name>`(새 secret) |
