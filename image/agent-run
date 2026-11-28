@@ -5,5 +5,10 @@ if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
   echo "agent-run: /run/secrets/claude_token is missing or empty (proj account add <alias>)" >&2
   exit 2
 fi
+# harness loads from its checkout (/opt/harness, pulled on the host before each task) on every run: Claude's plugin
+# cache would keep the first copy it installed, even across versions. AGENT_HUB_HARNESS=0 (proj plugin <name> rm
+# harness@devsosin-harness) turns it off.
+h="$(jq -r '.env.AGENT_HUB_HARNESS // "1"' /etc/claude-code/managed-settings.json 2>/dev/null || echo 1)"
+if [ "$h" != 0 ] && [ -d /opt/harness/plugins ]; then set -- --plugin-dir /opt/harness/plugins "$@"; fi
 # imagegen MCP on the host (proj imagegen); if it is down, claude just reports the server as failed.
 exec claude --mcp-config /etc/agent-hub/mcp.json "$@"

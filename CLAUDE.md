@@ -10,7 +10,7 @@ Git repository: `devsosin/agent-ochestration` (public — never commit tokens, h
 mac-agent/
 ├── bin/proj                 # CLI: projects, accounts, tasks (bash 3.2-compatible)
 ├── image/                   # Agent image: Dockerfile (targets base, web, rust, rust-web) + files copied into it
-│   ├── managed-settings.json  # default managed settings (harness on); bin/proj copies it per project
+│   ├── managed-settings.json  # default managed settings; bin/proj copies it per project (harness switch AGENT_HUB_HARNESS)
 │   ├── settings/            # permission + hook profiles: common.json + one team file (dev, marketing), merged per project
 │   ├── hooks/               # guard (.env, folder, settings, secrets, merge gate) and worklog hooks → /usr/local/lib/agent-hub/hooks
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
@@ -51,7 +51,7 @@ Runtime state lives outside the repo (never commit it):
 | `~/workspace/refs/<repo>/` | reference repo clones (`proj ref`), pulled on the host before each task run; mounted read-only at `/refs/<repo>` only in projects listing them (`REFS` in `<name>.env`, compose override `<name>.refs.yml`) |
 | `~/.agent-hub/knowledge/` | knowledge MCP server config `mcp.config.json` (written by `proj`, token hashes only), `github.token` (server's propose token), `db/` (ETL output, index) |
 | `~/.agent-hub/projects/<name>.knowledge.token` | that project's knowledge token (compose secret; empty while off) |
-| `~/workspace/harness/` (`HARNESS_DIR`) | harness plugin source (`devsosin/harness`), mounted read-only |
+| `~/workspace/harness/` (`HARNESS_DIR`) | harness plugin source (`devsosin/harness`), mounted read-only, pulled before each task, loaded with `agent-run --plugin-dir` (no plugin cache) |
 
 ## 2. Sources of truth
 

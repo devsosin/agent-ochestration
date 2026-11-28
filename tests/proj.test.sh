@@ -126,8 +126,8 @@ printf 'PROJECT_NAME=p1\nHARNESS_DIR=%s\n' "$AGENT_HUB_HOME/harness" > "$(env_fi
 printf 'PROJECT_NAME=p2\nHARNESS_DIR=%s\n' "$AGENT_HUB_HOME/harness" > "$(env_file p2)"
 sf="$(settings_file p1)"
 ensure_settings p1
-check "default settings: harness on" true "$(jq '.enabledPlugins["harness@devsosin-harness"]' "$sf")"
-check "default settings: harness marketplace at /opt/harness" /opt/harness "$(jq -r '.extraKnownMarketplaces["devsosin-harness"].source.path' "$sf")"
+check "default settings: harness on" 1 "$(jq -r '.env.AGENT_HUB_HARNESS' "$sf")"
+check "default settings: harness not a cached managed plugin" "null null" "$(jq -r '"\(.enabledPlugins["harness@devsosin-harness"]) \(.extraKnownMarketplaces["devsosin-harness"])"' "$sf")"
 ino="$(stat -f %i "$sf")"
 plugin_add p1 ponytail@pony-mkt --env PONYTAIL_DEFAULT_MODE=full --env X=a=b >/dev/null
 check "add enables the plugin" true "$(jq '.enabledPlugins["ponytail@pony-mkt"]' "$sf")"
@@ -146,8 +146,18 @@ plugin_rm p1 ponytail@pony-mkt >/dev/null
 check "rm disables the plugin" null "$(jq '.enabledPlugins["ponytail@pony-mkt"]' "$sf")"
 check "rm drops the unused marketplace" null "$(jq '.extraKnownMarketplaces["pony-mkt"]' "$sf")"
 plugin_rm p1 harness@devsosin-harness >/dev/null
-check "harness can be turned off, marketplace stays" "null /opt/harness" "$(jq -r '"\(.enabledPlugins["harness@devsosin-harness"]) \(.extraKnownMarketplaces["devsosin-harness"].source.path)"' "$sf")"
+check "harness can be turned off" 0 "$(jq -r '.env.AGENT_HUB_HARNESS' "$sf")"
 check "rm of a plugin that is off refused" "is not on" "$( (plugin_rm p1 harness@devsosin-harness) 2>&1 | grep -o 'is not on' || true)"
+check "ls without harness when off" 0 "$(plugin_ls p1 | grep -c harness || true)"
+plugin_add p1 harness@devsosin-harness >/dev/null
+check "harness back on" "1 null" "$(jq -r '"\(.env.AGENT_HUB_HARNESS) \(.enabledPlugins["harness@devsosin-harness"])"' "$sf")"
+# Settings from before: harness as a managed plugin (on), or removed with its marketplace left (off).
+printf '{"extraKnownMarketplaces":{"devsosin-harness":{"source":{"source":"directory","path":"/opt/harness"}}},"enabledPlugins":{"harness@devsosin-harness":true,"x@y":true},"env":{}}\n' > "$(settings_file p2)"
+ensure_settings p2
+check "old settings: harness on moves to the switch" "1 null null true" "$(jq -r '"\(.env.AGENT_HUB_HARNESS) \(.enabledPlugins["harness@devsosin-harness"]) \(.extraKnownMarketplaces["devsosin-harness"]) \(.enabledPlugins["x@y"])"' "$(settings_file p2)")"
+printf '{"extraKnownMarketplaces":{"devsosin-harness":{"source":{"source":"directory","path":"/opt/harness"}}},"enabledPlugins":{},"env":{}}\n' > "$(settings_file p2)"
+ensure_settings p2
+check "old settings: harness off stays off" 0 "$(jq -r '.env.AGENT_HUB_HARNESS' "$(settings_file p2)")"
 rm -f "$(env_file p1)" "$(env_file p2)" "$sf" "$(settings_file p2)"
 
 # Tasks run in the checkout on a new branch from the default branch; --worktree opts into .worktrees/<id>.
@@ -258,7 +268,7 @@ check "profile: work log hook" yes "$(jq -r '.hooks.Stop[0].hooks[0].command' "$
 check "profile: dev does not deny push" no "$(jq -e '.permissions.deny | index("Bash(git push*)")' "$s" >/dev/null && echo yes || echo no)"
 check "profile: dev has the Rust stop check" yes "$(jq -r '.hooks.Stop[].hooks[].command' "$s" | grep -q 'rust-check stop' && echo yes || echo no)"
 check "profile: dev has the Rust edit check" yes "$(jq -r '.hooks.PostToolUse[].hooks[].command' "$s" | grep -q 'rust-check edit' && echo yes || echo no)"
-check "profile: harness plugin kept" true "$(jq -r '.enabledPlugins["harness@devsosin-harness"]' "$s")"
+check "profile: harness switch kept" 1 "$(jq -r '.env.AGENT_HUB_HARNESS' "$s")"
 write_settings prof '.env.FOO = "1"'
 cmd_profile prof marketing >/dev/null
 check "profile: switched" marketing "$(project_var prof PROFILE)"
@@ -301,7 +311,7 @@ check "bare name refused for add" "owner/repo or a URL" "$( (cmd_ref add refq ap
 git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m two; git -C "$o/w" push -q origin HEAD:main
 refresh_refs refp
 check "refresh pulls the new commit" "$(git -C "$o/w" rev-parse HEAD)" "$(git -C "$REFS_DIR/api" rev-parse HEAD)"
-git -C "$REFS_DIR/api" remote set-url origin "file://$o/gone.git"
+git -C "$REFS_DIR/api" remote set-url origin "file://$o/gone.git"; rm -f "$REFS_DIR/api/.git/agent-hub-pulled"   # not within the 5 min skip
 check "failed pull warns and does not stop" "0 could not update" "$(refresh_refs refp 2>&1 >/dev/null | grep -o 'could not update' | sed 's/^/0 /')"
 check "ref update reports failure" 1 "$(ref_update >/dev/null 2>&1; echo $?)"
 check "ref add refused while a task runs" "running tasks" "$( (running_tasks() { echo t; }; cmd_ref add refp "file://$o/api.git") 2>&1 | grep -o 'running tasks' || true)"
@@ -343,7 +353,7 @@ check "lsp: marketplace mounted" /opt/plugins/claude-plugins-official "$(jq -r '
 check "lsp: second sync changes nothing" "" "$(sync_lsp lsp)"
 set_var lsp IMAGE agent-hub:web; sync_lsp lsp
 check "lsp: off without rust" null "$(jq -r '.enabledPlugins["rust-analyzer-lsp@claude-plugins-official"]' "$(settings_file lsp)")"
-check "lsp: harness stays on" true "$(jq -r '.enabledPlugins["harness@devsosin-harness"]' "$(settings_file lsp)")"
+check "lsp: harness stays on" 1 "$(jq -r '.env.AGENT_HUB_HARNESS' "$(settings_file lsp)")"
 rm -rf "$PLUGINS_DIR/claude-plugins-official"
 
 # knowledge MCP (proj knowledge): per-project tokens, the server's config, network joins. docker is stubbed.
@@ -402,5 +412,21 @@ unset -f docker; KNOWLEDGE_REPO=
 if command -v gh >/dev/null 2>&1; then
   check "host git: gh credential helper for github.com" "!$(command -v gh) auth git-credential" "$(host_git config --get credential.https://github.com.helper)"
 fi
+
+# Before a task: the harness checkout is pulled (at most every 5 min) and its commit goes into the task's meta.
+o="$(mktemp -d)"; git init -q --bare -b main "$o/h.git"; git clone -q "$o/h.git" "$o/w" 2>/dev/null
+git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one; git -C "$o/w" push -q origin HEAD:main
+git clone -q "$o/h.git" "$o/harness"
+printf 'PROJECT_NAME=hz\nHARNESS_DIR=%s\n' "$o/harness" > "$(env_file hz)"; td="$o/task"; mkdir -p "$td"; : > "$td/meta"
+git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m two; git -C "$o/w" push -q origin HEAD:main
+check "harness: pulled before the task, change reported" yes "$(refresh_harness hz "$td" | grep -q ' → ' && echo yes || echo no)"
+check "harness: checkout at the remote commit" "$(git -C "$o/w" rev-parse HEAD)" "$(git -C "$o/harness" rev-parse HEAD)"
+check "harness: commit in the task meta" "$(git -C "$o/harness" rev-parse --short HEAD)" "$(meta "$td" HARNESS)"
+git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m three; git -C "$o/w" push -q origin HEAD:main
+refresh_harness hz "$td" >/dev/null
+check "harness: second task within 5 min shares the pull" no "$([ "$(git -C "$o/harness" rev-parse HEAD)" = "$(git -C "$o/w" rev-parse HEAD)" ] && echo yes || echo no)"
+rm -f "$o/harness/.git/agent-hub-pulled"; git -C "$o/harness" remote set-url origin "file://$o/gone.git"
+check "harness: failed pull warns, task goes on" "could not update harness" "$(refresh_harness hz "$td" 2>&1 >/dev/null | grep -o 'could not update harness')"
+rm -rf "$o"
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }
