@@ -5,3 +5,5 @@ fi
 if [ -s /run/secrets/gh_token ]; then
   GH_TOKEN="$(cat /run/secrets/gh_token)"; export GH_TOKEN
 fi
+# Always set (empty when knowledge is off), so mcp.json's ${KNOWLEDGE_TOKEN} never stays literal.
+KNOWLEDGE_TOKEN="$(cat /run/secrets/knowledge_token 2>/dev/null || true)"; export KNOWLEDGE_TOKEN

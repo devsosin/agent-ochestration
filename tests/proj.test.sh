@@ -107,6 +107,7 @@ check "hub settings: plain additionalDirectories" "$HOME/Storage" "$(jq -r '.per
 check "hub may manage plugin sources" yes "$(jq -e '.permissions.allow | index("Bash(proj plugin source*)")' "$s" >/dev/null && echo yes || echo no)"
 check "hub may list and update reference repos" yes "$(jq -e '.permissions.allow | index("Bash(proj ref ls*)") and index("Bash(proj ref update*)")' "$s" >/dev/null && echo yes || echo no)"
 check "hub may not mount reference repos unasked" no "$(jq -e '.permissions.allow | index("Bash(proj ref add*)")' "$s" >/dev/null && echo yes || echo no)"
+check "hub may check and update knowledge" yes "$(jq -e '.permissions.allow | index("Bash(proj knowledge status*)") and index("Bash(proj knowledge update*)")' "$s" >/dev/null && echo yes || echo no)"
 check "hub has no allow rule for per-project plugin add/rm" 0 "$(jq '[.permissions.allow[] | select(test("proj plugin \\*|proj plugin [^sl]"))] | length' "$s")"
 
 # Plugins: marketplace clones on the host, per-project managed settings.
@@ -282,6 +283,7 @@ git init -q --bare -b main "$o/api.git"; git clone -q "$o/api.git" "$o/w" 2>/dev
 git -C "$o/w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m one; git -C "$o/w" push -q origin HEAD:main
 printf 'PROJECT_NAME=refp\nPROJECT_DIR=/w/refp\n' > "$(env_file refp)"
 printf 'PROJECT_NAME=refq\nPROJECT_DIR=/w/refq\n' > "$(env_file refq)"
+eval "$(declare -f dc | sed '1s/^dc /dc_real /')"   # kept for the knowledge checks below
 dc() { refs_override "$1" >/dev/null; }   # no Docker here: only the override file
 check "no refs: no override file" "" "$(refs_override refp)"
 cmd_ref add refp "file://$o/api.git" >/dev/null 2>&1
@@ -313,7 +315,7 @@ check "ref rm removes the override" no "$([ -f "$(refs_file refp)" ] && echo yes
 check "ref rm keeps the clone" yes "$([ -d "$REFS_DIR/api/.git" ] && echo yes || echo no)"
 check "ref rm of an unmounted ref refused" "not mounted" "$( (cmd_ref rm refp api) 2>&1 | grep -o 'not mounted' || true)"
 check "project name refs is reserved" reserved "$( (cmd_new Refs) 2>&1 | grep -o reserved || true)"
-unset -f dc; rm -rf "$o" "$(dirname "$REFS_DIR")"
+eval "$(declare -f dc_real | sed '1s/^dc_real /dc /')"; rm -rf "$o" "$(dirname "$REFS_DIR")"
 
 check "task refuses an unknown option" "unknown option: --here" "$( (cmd_task demo --here hi) 2>&1 | grep -o 'unknown option: --here' || true)"
 
@@ -343,5 +345,57 @@ set_var lsp IMAGE agent-hub:web; sync_lsp lsp
 check "lsp: off without rust" null "$(jq -r '.enabledPlugins["rust-analyzer-lsp@claude-plugins-official"]' "$(settings_file lsp)")"
 check "lsp: harness stays on" true "$(jq -r '.enabledPlugins["harness@devsosin-harness"]' "$(settings_file lsp)")"
 rm -rf "$PLUGINS_DIR/claude-plugins-official"
+
+# knowledge MCP (proj knowledge): per-project tokens, the server's config, network joins. docker is stubbed.
+dlog="$AGENT_HUB_HOME/docker.log"; : > "$dlog"; krun=no
+docker() { echo "$*" >> "$dlog"; case "$1" in image) return 1 ;; inspect) [ "$krun" = yes ] && [ "${3:-}" = '{{.State.Running}}' ] && echo true; return 0 ;; esac; return 0; }
+check "knowledge: needs KNOWLEDGE_REPO" "KNOWLEDGE_REPO" "$( (KNOWLEDGE_REPO=; knowledge_src) 2>&1 | grep -o 'KNOWLEDGE_REPO' | head -1)"
+KNOWLEDGE_REPO=o/knowledge
+printf 'PROJECT_NAME=kp\nPROJECT_DIR=/w/kp\n' > "$(env_file kp)"
+printf 'PROJECT_NAME=kq\nPROJECT_DIR=/w/kq\n' > "$(env_file kq)"
+kcfg="$KNOWLEDGE_DIR/mcp.config.json"
+knowledge_set kp on >/dev/null
+tok="$(cat "$(knowledge_token_file kp)")"
+check "knowledge on: 48 hex token" yes "$(printf '%s' "$tok" | grep -qE '^[0-9a-f]{48}$' && echo yes || echo no)"
+check "knowledge on: token file is 600" "-rw-------" "$(ls -l "$(knowledge_token_file kp)" | cut -c1-10)"
+check "knowledge on: config readable by the server (hashes only)" "-rw-r--r--" "$(ls -l "$kcfg" | cut -c1-10)"
+check "knowledge on: internal by default" internal "$(project_var kp KNOWLEDGE)"
+check "config: client in server format" "kp internal false ops" "$(jq -r '.clients[0] | "\(.name) \(.maxSensitivity) \(.propose) \(.spaces[0])"' "$kcfg")"
+check "config: sha256 of the project token" "$(printf '%s' "$tok" | shasum -a 256 | cut -d' ' -f1)" "$(jq -r '.clients[0].tokenSha256' "$kcfg")"
+check "config: no plain token" null "$(jq -r '.clients[0].token' "$kcfg")"
+check "config: token not in the file" 0 "$(grep -c "$tok" "$kcfg" || true)"
+check "config: proposal section always there" "o/knowledge KNOWLEDGE_GITHUB_TOKEN 5" "$(jq -r '.proposal | "\(.repo) \(.tokenEnv) \(.maxPerHour)"' "$kcfg")"
+check "config: listens inside the container" "0.0.0.0 8787" "$(jq -r '"\(.bind) \(.port)"' "$kcfg")"
+check "config: project without knowledge left out" 1 "$(jq '.clients | length' "$kcfg")"
+knowledge_set kp on --max confidential --propose >/dev/null
+check "on again: confidential and propose" "confidential true" "$(jq -r '.clients[0] | "\(.maxSensitivity) \(.propose)"' "$kcfg")"
+check "on again: token kept" "$tok" "$(cat "$(knowledge_token_file kp)")"
+check "bad --max refused" "internal or confidential" "$( (knowledge_set kp on --max secret) 2>&1 | grep -o 'internal or confidential')"
+knowledge_set kp rotate >/dev/null
+check "rotate: new token" no "$([ "$(cat "$(knowledge_token_file kp)")" = "$tok" ] && echo yes || echo no)"
+check "rotate: config follows" "$(token_sha256 "$(knowledge_token_file kp)")" "$(jq -r '.clients[0].tokenSha256' "$kcfg")"
+check "rotate refused while off" "knowledge is off" "$( (knowledge_set kq rotate) 2>&1 | grep -o 'knowledge is off')"
+check "refused while a task runs" "running tasks" "$( (running_tasks() { echo t; }; knowledge_set kp off) 2>&1 | grep -o 'running tasks')"
+knowledge_set kq on >/dev/null
+check "two projects, two clients" "kp kq" "$(jq -r '[.clients[].name] | sort | join(" ")' "$kcfg")"
+check "tokens differ per project" no "$([ "$(cat "$(knowledge_token_file kp)")" = "$(cat "$(knowledge_token_file kq)")" ] && echo yes || echo no)"
+krun=yes; : > "$dlog"
+knowledge_attach kp
+check "attach: joins the project network" 1 "$(grep -c '^network connect proj-kp_default knowledge-mcp$' "$dlog")"
+knowledge_set kq off >/dev/null
+check "off: token revoked" "" "$(cat "$(knowledge_token_file kq)")"
+check "off: out of the config" "kp" "$(jq -r '[.clients[].name] | join(" ")' "$kcfg")"
+check "off: server restarted for the new config" 1 "$(grep -c '^restart knowledge-mcp$' "$dlog")"
+check "off: leaves the project network" 1 "$(grep -c '^network disconnect proj-kq_default knowledge-mcp$' "$dlog")"
+: > "$dlog"; ensure_settings kp
+dc kp up -d >/dev/null
+check "dc up joins the server again" 1 "$(grep -c '^network connect proj-kp_default knowledge-mcp$' "$dlog")"
+: > "$dlog"; dc kp down >/dev/null
+check "dc down detaches the server first" "network disconnect proj-kp_default knowledge-mcp" "$(grep -v '^inspect' "$dlog" | head -1)"
+printf 'PROJECT_NAME=kn\nPROJECT_DIR=/w/kn\n' > "$(env_file kn)"; ensure_settings kn
+dc kn up -d >/dev/null
+check "dc makes an empty secret for projects without knowledge" "-rw------- 0" "$(ls -l "$(knowledge_token_file kn)" | awk '{print substr($1, 1, 10), $5}')"
+check "no knowledge: server not joined" 0 "$(grep -c '^network connect proj-kn_default' "$dlog" || true)"
+unset -f docker; KNOWLEDGE_REPO=
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

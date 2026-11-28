@@ -21,6 +21,8 @@
       "Bash(proj plugin ls*)",
       "Bash(proj ref ls*)",
       "Bash(proj ref update*)",
+      "Bash(proj knowledge status*)",
+      "Bash(proj knowledge update*)",
       "Bash(git -C * log*)",
       "Bash(git -C * diff*)",
       "Bash(git -C * status*)",

@@ -17,7 +17,7 @@ services:
     env_file:
       - path: ${ACCOUNT_DIR:?}/git.env
         required: false
-    secrets: [claude_token, gh_token]
+    secrets: [claude_token, gh_token, knowledge_token]
     volumes:
       - ${PROJECT_DIR}:${PROJECT_DIR}
       - ${HARNESS_DIR:?}:/opt/harness:ro
@@ -57,3 +57,6 @@ secrets:
     file: ${ACCOUNT_DIR}/claude.token
   gh_token:
     file: ${ACCOUNT_DIR}/gh.token
+  # This project's knowledge MCP token (proj knowledge <name> on); an empty file while knowledge is off. bin/proj sets it.
+  knowledge_token:
+    file: ${KNOWLEDGE_TOKEN_FILE:?}

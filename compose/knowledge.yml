@@ -1,0 +1,31 @@
+# knowledge MCP server for project agents. Image from the knowledge repo (proj knowledge build); its runtime contract is in
+# that repo's engine/mcp/README.md ("Container"). Driven by bin/proj:
+#   docker compose -p agent-hub-knowledge -f compose/knowledge.yml up -d   (proj knowledge up)
+# Not published on the host: bin/proj connects it to the network of each project with knowledge on, so projects stay
+# apart. No agent-hub.project label, so project Docker proxies cannot touch it.
+services:
+  knowledge-mcp:
+    image: agent-hub:knowledge-mcp
+    container_name: knowledge-mcp
+    init: true
+    restart: unless-stopped
+    read_only: true
+    # The server reads its GitHub token (propose_update) from the environment; it stays a secret file until here.
+    # Overriding the entrypoint drops the image's CMD, so the command repeats it.
+    entrypoint: ["/bin/sh", "-c", "KNOWLEDGE_GITHUB_TOKEN=\"$$(cat /run/secrets/knowledge_github_token 2>/dev/null)\"; export KNOWLEDGE_GITHUB_TOKEN; exec \"$$0\" \"$$@\""]
+    command: ["node_modules/.bin/tsx", "src/mcp/main.ts"]
+    secrets: [knowledge_github_token]
+    tmpfs: [/tmp]   # propose_update clones into a temp dir per request
+    volumes:
+      - ${KNOWLEDGE_SRC:?}:/knowledge:ro
+      - ${KNOWLEDGE_DIR:?}/db:/var/lib/knowledge/db:ro   # ETL output (the user runs it on the host); a directory, since ETL renames files
+      - ${KNOWLEDGE_DIR}/mcp.config.json:/etc/knowledge/mcp.config.json:ro
+      - knowledge-index:/var/lib/knowledge/index         # the only place the server writes (uid 10001)
+    mem_limit: 512m
+
+volumes:
+  knowledge-index:
+
+secrets:
+  knowledge_github_token:
+    file: ${KNOWLEDGE_DIR}/github.token

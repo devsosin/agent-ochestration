@@ -19,6 +19,7 @@ mac-agent/
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
 │   └── gitconfig            # gh credential helper, ssh→https rewrite, safe.directory
 ├── compose/project.yml      # one compose project per registered project (proj-<name>)
+├── compose/knowledge.yml    # knowledge MCP server (one container, joined to projects with knowledge on)
 ├── dockerproxy/           # Docker API proxy sidecar (compose service `docker`): server.py + Dockerfile, stdlib Python
 ├── imagegen/server.py       # image MCP on the host (Codex CLI with the host's ChatGPT login), stdlib Python
 ├── hub/                     # main agent: CLAUDE.md (its operating guide, linked into ~/.agent-hub/hub) + settings.json (permissions)
@@ -48,6 +49,8 @@ Runtime state lives outside the repo (never commit it):
 | `~/.claude-<alias>/` | host Claude config per account (full login, used by the hub) |
 | `~/workspace/<name>/` (`WORKSPACE_ROOT`) | project checkout (tasks run here on `agent/<id>`); `--worktree` tasks in `.worktrees/<id>/` |
 | `~/workspace/refs/<repo>/` | reference repo clones (`proj ref`), pulled on the host before each task run; mounted read-only at `/refs/<repo>` only in projects listing them (`REFS` in `<name>.env`, compose override `<name>.refs.yml`) |
+| `~/.agent-hub/knowledge/` | knowledge MCP server config `mcp.config.json` (written by `proj`, token hashes only), `github.token` (server's propose token), `db/` (ETL output, index) |
+| `~/.agent-hub/projects/<name>.knowledge.token` | that project's knowledge token (compose secret; empty while off) |
 | `~/workspace/harness/` (`HARNESS_DIR`) | harness plugin source (`devsosin/harness`), mounted read-only |
 
 ## 2. Sources of truth
