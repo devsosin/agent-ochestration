@@ -172,10 +172,11 @@
 | 항목 | 내용 |
 |---|---|
 | 소스 | `proj plugin source add DietrichGebert/ponytail` → `~/.agent-hub/plugins/ponytail/` (`owner/repo`는 호스트 `gh`, URL은 `git clone`). 모든 컨테이너에 `/opt/plugins`로 읽기 전용 마운트 |
-| 켜기 | `proj plugin app add ponytail@ponytail --env PONYTAIL_DEFAULT_MODE=full`. 이름은 `<플러그인>@<marketplace.json의 name>`. harness는 `harness@devsosin-harness`(기본 켬) |
-| 설정 파일 | `~/.agent-hub/projects/<name>.managed-settings.json` (jq로 생성: `extraKnownMarketplaces`, `enabledPlugins`, `env`) → `/etc/claude-code/managed-settings.json:ro`. 없으면 `proj new`·`up`·다음 작업에서 `image/managed-settings.json` 기본값(harness만)으로 만듦 |
+| 켜기 | `proj plugin app add ponytail@ponytail --env PONYTAIL_DEFAULT_MODE=full`. 이름은 `<플러그인>@<marketplace.json의 name>`. harness는 `harness@devsosin-harness`(기본 켬, 아래 "harness") |
+| 설정 파일 | `~/.agent-hub/projects/<name>.managed-settings.json` (jq로 생성: `extraKnownMarketplaces`, `enabledPlugins`, `env`) → `/etc/claude-code/managed-settings.json:ro`. 없으면 `proj new`·`up`·다음 작업에서 `image/managed-settings.json` 기본값으로 만듦 |
 | 반영 | 다음 `claude -p` 작업부터, 컨테이너 재시작 없음 (파일을 같은 inode에 덮어써 실행 중 컨테이너에도 바로 보임. OrbStack에서 확인). 처음 쓸 때 `CLAUDE_CODE_SYNC_PLUGIN_INSTALL=1`로 Claude 설정 볼륨에 설치, 신뢰 확인 없음 |
-| 갱신 | `proj plugin source update [marketplace]` — 컨테이너는 플러그인 코드를 바꿀 수 없음 |
+| 갱신 | `proj plugin source update [marketplace]` — 컨테이너는 플러그인 코드를 바꿀 수 없음. 한계: Claude Code는 처음 설치한 복사본(설정 볼륨의 플러그인 캐시)을 계속 쓰고 새 세션에서도 갱신하지 않음(버전이 올라가도). harness는 그래서 캐시를 쓰지 않음(아래) |
+| harness | 캐시 대신 매 실행 `agent-run --plugin-dir /opt/harness/plugins`로 checkout에서 직접 로드. `proj task`·`reply`가 시작 직전에 호스트 `HARNESS_DIR`을 `git pull --ff-only`(5분 안에 받은 적 있으면 건너뜀, 실패하면 경고만), 작업 `meta`에 `HARNESS=<커밋>`, 바뀌었으면 `harness <이전> → <이후>` 출력. 끄기는 `proj plugin <name> rm harness@devsosin-harness`(managed settings `env.AGENT_HUB_HARNESS=0`). 예전 설정 파일은 자동으로 옮김. `proj shell`에서 직접 `claude`를 실행하면 harness가 없음 → `agent-run` 사용. 실행 중인 다른 작업도 pull 뒤의 skill 파일을 읽을 수 있음(작업 시작 때만 pull) |
 | 준비 | 이 기능 이전에 만든 프로젝트는 `proj up <name>` 한 번 (새 마운트 추가) |
 
 - skill 호출(headless 작업): 지시문에 skill 이름을 그대로 쓴다. 플러그인 skill은 `/ponytail:ponytail-audit`처럼 `<플러그인>:<skill>` 형태로 `claude -p`의 slash command 목록에 올라온다(init 이벤트에서 확인). 실제 실행까지는 계정 로그인이 있는 맥미니에서 확인 필요.

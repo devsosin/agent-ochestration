@@ -93,6 +93,7 @@ Mac mini
 | 2026-11-27 | 이미지를 개발 환경별로 나눔: `base` / `web`(Playwright) / `rust`(+ rust-analyzer, LSP 플러그인 자동) / `rust-web`. `Cargo.toml`·`package.json`으로 자동 선택, 마케팅은 `base`. #25의 base 포함 결정을 바꿈 (#29) | Rust 컨테이너에 브라우저(약 1.1GB)가 필요 없고, 프론트에는 rust가 필요 없음 (사용자 결정) |
 | 2026-11-27 | Rust 검사는 개발 프로필 훅(`rust-check`): 수정 직후 SQL 상태 문자열, 작업 끝에 fmt·clippy(`--workspace`, 한 번만 막음). ponytail audit은 리팩토링 때만, 지도 길이는 늘리지 않음 (#28) | 규칙을 CLAUDE.md에 길게 적지 않고 작업 중에 강제. 마케팅 프로필에는 불필요 (사용자 결정) |
 | 2026-11-27 | knowledge MCP: 공유 네트워크 대신 켠 프로젝트 네트워크에만 서버 연결, 프로젝트별 토큰 → 최대 sensitivity(기본 `internal`, `confidential`은 사용자 확인), 쓰기는 `propose_update` PR만, 서버 수명주기는 `proj knowledge`, 지식 저장소는 `refs/` clone (#34) | 계정·프로젝트 경계 유지, 사실 변경은 항상 사용자 리뷰 (사용자 결정) |
+| 2026-11-28 | harness는 플러그인 캐시를 쓰지 않고 매 실행 `--plugin-dir /opt/harness/plugins`로 로드, `proj task`·`reply` 직전에 호스트 checkout을 pull(5분 중복 방지, 실패는 경고). 참고 저장소·knowledge도 같은 시점에 pull (#37) | Claude Code가 managed 플러그인을 처음 설치한 복사본으로 계속 써서 최신 harness가 반영되지 않았음 (사용자 요청) |
 
 ## 단계
 
