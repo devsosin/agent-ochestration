@@ -21,7 +21,8 @@ USAGE_STALE="${USAGE_STALE:-1800}"
 COMPOSE_FILE="$REPO_DIR/compose/project.yml"
 CTR_TASKS=/var/agent-hub/tasks
 PLUGINS_DIR="$HUB/plugins"           # marketplace clones, mounted read-only at /opt/plugins
-HARNESS_MARKET=devsosin-harness      # marketplace at /opt/harness (image/managed-settings.json)
+HARNESS_MARKET=devsosin-harness      # marketplace at /opt/harness
+HARNESS_PLUGIN=harness@$HARNESS_MARKET  # loaded by agent-run --plugin-dir; on/off is AGENT_HUB_HARNESS in managed settings
 
 die() { echo "proj: $*" >&2; exit 1; }
 # Host git for GitHub over https with the host's gh login, also on machines without `gh auth setup-git`: gh repo clone
@@ -365,17 +366,32 @@ refs_override() { # refs_override <name>: writes the compose file mounting the p
   printf '%s' "$f"
 }
 
-pull_ref() { # pull_ref <repo>: fast-forwards the clone; warns instead of prompting, and gives up on a stalled transfer
+pull_dir() { # pull_dir <checkout> <label> [minutes]: fast-forwards; warns instead of prompting, gives up on a stalled transfer.
+  # With minutes, skips a checkout pulled that recently (tasks starting together share one pull).
+  local stamp="$1/.git/agent-hub-pulled"
+  [ -z "${3:-}" ] || [ -z "$(find "$stamp" -mmin -"$3" 2>/dev/null)" ] || return 0
   # shortcut: no timeout on connecting (macOS has no timeout(1)); add one if a dead remote ever hangs task starts.
   GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20 \
-    host_git -C "$REFS_DIR/$1" pull -q --ff-only >&2 2>&1 \
-    || { echo "proj: warning: could not update reference repo $1; using it as is" >&2; return 1; }
+    host_git -C "$1" pull -q --ff-only >&2 2>&1 \
+    || { echo "proj: warning: could not update $2; using it as is" >&2; return 1; }
+  touch "$stamp" 2>/dev/null || true
+}
+pull_ref() { pull_dir "$REFS_DIR/$1" "reference repo $1" "${2:-}"; }   # pull_ref <repo> [minutes]
+
+refresh_harness() { # refresh_harness <name> <task dir>: pulls the project's harness checkout, records its commit for the task
+  local h b a; h="$(project_var "$1" HARNESS_DIR 2>/dev/null || true)"
+  [ -d "$h/.git" ] || return 0
+  b="$(git -C "$h" rev-parse --short HEAD 2>/dev/null)"
+  pull_dir "$h" "harness ($(tilde "$h"))" 5 || true
+  a="$(git -C "$h" rev-parse --short HEAD 2>/dev/null)"
+  echo "HARNESS=$a" >> "$2/meta"
+  [ "$a" = "$b" ] || echo "harness $b → $a"
 }
 
 refresh_refs() { # refresh_refs <name>: before a task run; a failed pull never stops the task
   local r
   for r in $(project_var "$1" REFS 2>/dev/null || true); do
-    [ ! -d "$REFS_DIR/$r/.git" ] || pull_ref "$r" || true
+    [ ! -d "$REFS_DIR/$r/.git" ] || pull_ref "$r" 5 || true
   done
 }
 
@@ -527,7 +543,7 @@ knowledge_ready() { # knowledge_ready <name>: before a task run; problems only w
   local src
   [ -n "$(project_var "$1" KNOWLEDGE 2>/dev/null || true)" ] || return 0
   src="$(knowledge_src 2>/dev/null)" && [ -d "$src/.git" ] || { echo "proj: warning: knowledge is on for $1 but there is no checkout (proj knowledge build)" >&2; return 0; }
-  pull_ref "$(basename "$src")" || true   # the server re-indexes on its next request when files under spaces/ changed
+  pull_ref "$(basename "$src")" 5 || true   # the server re-indexes on its next request when files under spaces/ changed
   if ! knowledge_running; then
     (knowledge_up) >/dev/null 2>&1 || echo "proj: warning: knowledge server did not start (proj knowledge status)" >&2   # die must not end the task
   fi
@@ -714,10 +730,19 @@ cmd_alias() { # proj alias <name> <alias, e.g. 스모크>
 
 settings_file() { printf '%s/projects/%s.managed-settings.json' "$HUB" "$1"; }
 
-ensure_settings() { # the image's managed settings (harness on) + env, with the project's profile rules kept current
+ensure_settings() { # the image's managed settings + env, with the project's profile rules kept current
   local f n d p tmp; f="$(settings_file "$1")"; n="$(project_profile "$1")"
   d="$(project_var "$1" PROJECT_DIR 2>/dev/null || true)"
-  [ -f "$f" ] || jq '. + {env: {}}' "$REPO_DIR/image/managed-settings.json" > "$f"
+  [ -f "$f" ] || jq '.env = (.env // {})' "$REPO_DIR/image/managed-settings.json" > "$f"
+  # Harness loads from /opt/harness on every run (agent-run --plugin-dir), not from Claude's plugin cache, which keeps
+  # the first copy it installed. Its switch is AGENT_HUB_HARNESS; older files had it as a managed plugin (removed with
+  # proj plugin rm = off, while its marketplace stayed).
+  tmp="$(jq --arg h "$HARNESS_PLUGIN" --arg m "$HARNESS_MARKET" '
+    .env = (.env // {})
+    | .env.AGENT_HUB_HARNESS = (.env.AGENT_HUB_HARNESS // (if .enabledPlugins[$h] == true then "1"
+        elif (.extraKnownMarketplaces // {} | has($m)) then "0" else "1" end))
+    | del(.enabledPlugins[$h], .extraKnownMarketplaces[$m])' "$f")"
+  [ "$tmp" = "$(jq . "$f")" ] || printf '%s\n' "$tmp" > "$f"   # in place, see write_settings
   p="$(profile_json "$n")" || die "bad settings profile for $1 (proj profile $1 <profile>)"
   # For the hooks (image/hooks), also in proj shell sessions: work log columns and the project folder.
   p="$(printf '%s' "$p" | jq -c --arg n "$n" --arg d "$d" '. + {env: {AGENT_HUB_PROFILE: $n, AGENT_HUB_PROJECT_DIR: $d}}')"
@@ -819,9 +844,9 @@ plugin_add() { # plugin_add <name> <plugin@marketplace> [--env KEY=VALUE ...] (K
   m="${p#*@}"; dir="$(market_dir "$name" "$m")"
   jq -e --arg n "${p%@*}" 'any(.plugins[]; .name == $n)' "$dir/.claude-plugin/marketplace.json" >/dev/null 2>&1 \
     || die "no plugin ${p%@*} in marketplace $m (proj plugin source ls)"
-  write_settings "$name" --arg p "$p" --arg m "$m" --arg h "$HARNESS_MARKET" '
-    .enabledPlugins[$p] = true
-    | if $m == $h then . else .extraKnownMarketplaces[$m] = {source: {source: "directory", path: ("/opt/plugins/" + $m)}} end
+  write_settings "$name" --arg p "$p" --arg m "$m" --arg h "$HARNESS_MARKET" --arg hp "$HARNESS_PLUGIN" '
+    if $p == $hp then .env.AGENT_HUB_HARNESS = "1"
+    else .enabledPlugins[$p] = true | .extraKnownMarketplaces[$m] = {source: {source: "directory", path: ("/opt/plugins/" + $m)}} end
     | .env = ((.env // {}) + ($ARGS.positional | map(capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}) | add // {})
              | with_entries(select(.value != "")))' --args ${envs[@]+"${envs[@]}"}
   echo "$name: $p on from the next task"
@@ -830,6 +855,12 @@ plugin_add() { # plugin_add <name> <plugin@marketplace> [--env KEY=VALUE ...] (K
 plugin_rm() { # plugin_rm <name> <plugin@marketplace>: drops the marketplace too when no other plugin of it is on
   local name="$1" p="${2:-}"
   case "$p" in ?*@?*) ;; *) die "usage: proj plugin <name> rm <plugin@marketplace>" ;; esac
+  ensure_settings "$name"
+  if [ "$p" = "$HARNESS_PLUGIN" ]; then
+    [ "$(jq -r '.env.AGENT_HUB_HARNESS' "$(settings_file "$name")")" != 0 ] || die "$p is not on in $name"
+    write_settings "$name" '.env.AGENT_HUB_HARNESS = "0"'
+    echo "$name: $p off from the next task"; return
+  fi
   jq -e --arg p "$p" '.enabledPlugins | has($p)' "$(settings_file "$name")" >/dev/null 2>&1 || die "$p is not on in $name"
   write_settings "$name" --arg p "$p" --arg m "${p#*@}" --arg h "$HARNESS_MARKET" '
     del(.enabledPlugins[$p])
@@ -839,8 +870,8 @@ plugin_rm() { # plugin_rm <name> <plugin@marketplace>: drops the marketplace too
 
 plugin_ls() {
   ensure_settings "$1"
-  jq -r --arg n "$1" '(.env // {} | del(.AGENT_HUB_PROFILE, .AGENT_HUB_PROJECT_DIR)) as $e   # set by bin/proj, not plugin options
-    | "\($n): \(.enabledPlugins | to_entries | map(select(.value) | .key) | join(", "))"
+  jq -r --arg n "$1" --arg hp "$HARNESS_PLUGIN" '(.env // {} | del(.AGENT_HUB_PROFILE, .AGENT_HUB_PROJECT_DIR, .AGENT_HUB_HARNESS)) as $e   # set by bin/proj, not plugin options
+    | "\($n): \((if .env.AGENT_HUB_HARNESS == "0" then [] else [$hp] end) + (.enabledPlugins // {} | to_entries | map(select(.value) | .key)) | join(", "))"
     + (if $e == {} then "" else "  env: \($e | to_entries | map("\(.key)=\(.value)") | join(" "))" end)' \
     "$(settings_file "$1")"
 }
@@ -1141,7 +1172,7 @@ launch() { # launch <task dir> [session id to resume]
   local d="$1" resume="${2:-}" id project workdir sys model merge
   id="$(basename "$d")"; project="$(meta "$d" PROJECT)"; workdir="$(meta "$d" WORKDIR)"
   can_launch "$project"
-  refresh_refs "$project"; knowledge_ready "$project"
+  refresh_harness "$project" "$d"; refresh_refs "$project"; knowledge_ready "$project"
   model="$(project_var "$project" MODEL || true)"
   sys="You run inside an agent-hub project container. Task $id, working directory $workdir"
   if [ -n "$(meta "$d" BRANCH)" ]; then
