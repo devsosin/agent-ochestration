@@ -130,12 +130,25 @@ check "default settings: harness on" 1 "$(jq -r '.env.AGENT_HUB_HARNESS' "$sf")"
 check "default settings: harness not a cached managed plugin" "null null" "$(jq -r '"\(.enabledPlugins["harness@devsosin-harness"]) \(.extraKnownMarketplaces["devsosin-harness"])"' "$sf")"
 ino="$(stat -f %i "$sf")"
 plugin_add p1 ponytail@pony-mkt --env PONYTAIL_DEFAULT_MODE=full --env X=a=b >/dev/null
-check "add enables the plugin" true "$(jq '.enabledPlugins["ponytail@pony-mkt"]' "$sf")"
-check "add registers its directory marketplace" /opt/plugins/pony-mkt "$(jq -r '.extraKnownMarketplaces["pony-mkt"].source.path' "$sf")"
+check "add lists a local-source plugin for --plugin-dir" ponytail@pony-mkt "$(jq -r '.env.AGENT_HUB_PLUGINS' "$sf")"
+check "add: local-source plugin not a cached managed plugin" "null null" "$(jq -r '"\(.enabledPlugins["ponytail@pony-mkt"]) \(.extraKnownMarketplaces["pony-mkt"])"' "$sf")"
 check "add sets env options" full "$(jq -r '.env.PONYTAIL_DEFAULT_MODE' "$sf")"
 check "env value keeps '='" a=b "$(jq -r '.env.X' "$sf")"
 check "settings rewritten in place (bind mount keeps the inode)" "$ino" "$(stat -f %i "$sf")"
-check "other project unaffected" null "$(ensure_settings p2; jq '.enabledPlugins["ponytail@pony-mkt"]' "$(settings_file p2)")"
+check "other project unaffected" null "$(ensure_settings p2; jq '.env.AGENT_HUB_PLUGINS' "$(settings_file p2)")"
+check "ls does not show the list as env" 0 "$(plugin_ls p1 | grep -c AGENT_HUB_PLUGINS || true)"
+# Remote sources and strict:false entries without a plugin.json stay managed plugins (Claude's cache).
+jq '.plugins += [{name: "remote", source: {source: "git-subdir", url: "https://example.com/r.git", path: "p"}},
+  {name: "loose", source: "./loose", strict: false}]' "$PLUGINS_DIR/pony-mkt/.claude-plugin/marketplace.json" > "$AGENT_HUB_HOME/m.json"
+mv "$AGENT_HUB_HOME/m.json" "$PLUGINS_DIR/pony-mkt/.claude-plugin/marketplace.json"; mkdir -p "$PLUGINS_DIR/pony-mkt/loose"
+plugin_add p1 remote@pony-mkt >/dev/null; plugin_add p1 loose@pony-mkt >/dev/null
+check "add: remote source is a managed plugin" "true true /opt/plugins/pony-mkt ponytail@pony-mkt" \
+  "$(jq -r '"\(.enabledPlugins["remote@pony-mkt"]) \(.enabledPlugins["loose@pony-mkt"]) \(.extraKnownMarketplaces["pony-mkt"].source.path) \(.env.AGENT_HUB_PLUGINS)"' "$sf")"
+check "ls shows both kinds" 1 "$(plugin_ls p1 | grep -c "harness@devsosin-harness, ponytail@pony-mkt, remote@pony-mkt, loose@pony-mkt ")"
+plugin_rm p1 remote@pony-mkt >/dev/null
+check "rm of one managed plugin keeps the marketplace for the other" /opt/plugins/pony-mkt "$(jq -r '.extraKnownMarketplaces["pony-mkt"].source.path' "$sf")"
+plugin_rm p1 loose@pony-mkt >/dev/null
+check "rm of the last managed plugin drops the marketplace" "null ponytail@pony-mkt" "$(jq -r '"\(.extraKnownMarketplaces["pony-mkt"]) \(.env.AGENT_HUB_PLUGINS)"' "$sf")"
 check "ls shows plugins and env" 1 "$(plugin_ls p1 | grep -c 'ponytail@pony-mkt.*PONYTAIL_DEFAULT_MODE=full')"
 plugin_add p1 ponytail@pony-mkt --env X= >/dev/null
 check "KEY= removes an env option" null "$(jq '.env.X' "$sf")"
@@ -143,8 +156,8 @@ check "unknown plugin refused" "no plugin" "$( (plugin_add p1 nope@pony-mkt) 2>&
 check "unknown marketplace refused" "no plugin" "$( (plugin_add p1 x@missing) 2>&1 | grep -o 'no plugin' || true)"
 check "bad --env refused" "KEY=VALUE" "$( (plugin_add p1 ponytail@pony-mkt --env 1X=y) 2>&1 | grep -o 'KEY=VALUE' || true)"
 plugin_rm p1 ponytail@pony-mkt >/dev/null
-check "rm disables the plugin" null "$(jq '.enabledPlugins["ponytail@pony-mkt"]' "$sf")"
-check "rm drops the unused marketplace" null "$(jq '.extraKnownMarketplaces["pony-mkt"]' "$sf")"
+check "rm takes it off the list" "null null" "$(jq -r '"\(.env.AGENT_HUB_PLUGINS) \(.enabledPlugins["ponytail@pony-mkt"])"' "$sf")"
+check "rm of a listed plugin that is off refused" "is not on" "$( (plugin_rm p1 ponytail@pony-mkt) 2>&1 | grep -o 'is not on' || true)"
 plugin_rm p1 harness@devsosin-harness >/dev/null
 check "harness can be turned off" 0 "$(jq -r '.env.AGENT_HUB_HARNESS' "$sf")"
 check "rm of a plugin that is off refused" "is not on" "$( (plugin_rm p1 harness@devsosin-harness) 2>&1 | grep -o 'is not on' || true)"
@@ -158,6 +171,31 @@ check "old settings: harness on moves to the switch" "1 null null true" "$(jq -r
 printf '{"extraKnownMarketplaces":{"devsosin-harness":{"source":{"source":"directory","path":"/opt/harness"}}},"enabledPlugins":{},"env":{}}\n' > "$(settings_file p2)"
 ensure_settings p2
 check "old settings: harness off stays off" 0 "$(jq -r '.env.AGENT_HUB_HARNESS' "$(settings_file p2)")"
+# Settings from before: local-source plugins as managed plugins move to the list; remote ones stay.
+printf '{"extraKnownMarketplaces":{"pony-mkt":{"source":{"source":"directory","path":"/opt/plugins/pony-mkt"}}},"enabledPlugins":{"ponytail@pony-mkt":true,"remote@pony-mkt":true},"env":{"PONYTAIL_DEFAULT_MODE":"full"}}\n' > "$(settings_file p2)"
+ensure_settings p2
+check "old settings: local plugin moves to the list, remote stays" "ponytail@pony-mkt null true /opt/plugins/pony-mkt full" \
+  "$(jq -r '"\(.env.AGENT_HUB_PLUGINS) \(.enabledPlugins["ponytail@pony-mkt"]) \(.enabledPlugins["remote@pony-mkt"]) \(.extraKnownMarketplaces["pony-mkt"].source.path) \(.env.PONYTAIL_DEFAULT_MODE)"' "$(settings_file p2)")"
+printf '{"extraKnownMarketplaces":{"pony-mkt":{"source":{"source":"directory","path":"/opt/plugins/pony-mkt"}}},"enabledPlugins":{"ponytail@pony-mkt":true},"env":{}}\n' > "$(settings_file p2)"
+ensure_settings p2
+check "old settings: marketplace dropped when no managed plugin is left" "ponytail@pony-mkt {}" \
+  "$(jq -c -r '"\(.env.AGENT_HUB_PLUGINS) \(.extraKnownMarketplaces)"' "$(settings_file p2)")"
+
+# agent-run's --plugin-dir folders (image/plugin-dirs) for container paths under a fake /opt.
+opt="$(mktemp -d)"; mkdir -p "$opt/harness/plugins" "$opt/plugins/rooted/.claude-plugin" "$opt/plugins/rooted/plugins/x"
+ln -s "$PLUGINS_DIR/pony-mkt" "$opt/plugins/pony-mkt"
+echo '{"name":"rooted","metadata":{"pluginRoot":"./plugins"},"plugins":[{"name":"x","source":"x"}]}' > "$opt/plugins/rooted/.claude-plugin/marketplace.json"
+echo '{"env":{"AGENT_HUB_PLUGINS":"ponytail@pony-mkt x@rooted remote@pony-mkt gone@nowhere"}}' > "$opt/s.json"
+pd() { AGENT_HUB_SETTINGS="$opt/s.json" AGENT_HUB_OPT="$opt" "$REPO_DIR/image/plugin-dirs" "$@"; }
+check "plugin-dirs: harness, then each listed local plugin folder" "$opt/harness/plugins $opt/plugins/pony-mkt $opt/plugins/rooted/plugins/x" "$(pd 2>/dev/null | tr '\n' ' ' | sed 's/ $//')"
+check "plugin-dirs: warns about plugins it cannot load" 2 "$(pd 2>&1 >/dev/null | grep -c 'skipped')"
+echo '{"env":{"AGENT_HUB_HARNESS":"0"}}' > "$opt/s.json"
+check "plugin-dirs: harness off, nothing listed" "" "$(pd)"
+check "plugin-dirs: one plugin's folder" "$opt/plugins/rooted/plugins/x" "$(pd "$opt/plugins/rooted" x)"
+check "plugin-dirs: strict:false needs a plugin.json" 1 "$(pd "$opt/plugins/pony-mkt" loose >/dev/null; echo $?)"
+mkdir -p "$opt/plugins/pony-mkt/loose/.claude-plugin"; echo '{"name":"loose"}' > "$opt/plugins/pony-mkt/loose/.claude-plugin/plugin.json"
+check "plugin-dirs: strict:false with a plugin.json loads" "$opt/plugins/pony-mkt/loose" "$(pd "$opt/plugins/pony-mkt" loose)"
+rm -rf "$opt"
 rm -f "$(env_file p1)" "$(env_file p2)" "$sf" "$(settings_file p2)"
 
 # Tasks run in the checkout on a new branch from the default branch; --worktree opts into .worktrees/<id>.
@@ -346,13 +384,13 @@ rm -rf "$w"
 printf 'PROJECT_NAME=lsp\nPROJECT_DIR=/w/lsp\nIMAGE=agent-hub:rust\n' > "$(env_file lsp)"
 check "lsp: no marketplace, only a note" "proj plugin source add anthropics/claude-plugins-official" "$(sync_lsp lsp | grep -o 'proj plugin source add anthropics/claude-plugins-official')"
 mkdir -p "$PLUGINS_DIR/claude-plugins-official/.claude-plugin"
-echo '{"name":"claude-plugins-official","plugins":[{"name":"rust-analyzer-lsp"}]}' > "$PLUGINS_DIR/claude-plugins-official/.claude-plugin/marketplace.json"
+echo '{"name":"claude-plugins-official","plugins":[{"name":"rust-analyzer-lsp","source":"./plugins/rust-analyzer-lsp","strict":false}]}' > "$PLUGINS_DIR/claude-plugins-official/.claude-plugin/marketplace.json"
+mkdir -p "$PLUGINS_DIR/claude-plugins-official/plugins/rust-analyzer-lsp/.claude-plugin"; echo '{"name":"rust-analyzer-lsp"}' > "$PLUGINS_DIR/claude-plugins-official/plugins/rust-analyzer-lsp/.claude-plugin/plugin.json"
 sync_lsp lsp >/dev/null
-check "lsp: on for rust" true "$(jq -r '.enabledPlugins["rust-analyzer-lsp@claude-plugins-official"]' "$(settings_file lsp)")"
-check "lsp: marketplace mounted" /opt/plugins/claude-plugins-official "$(jq -r '.extraKnownMarketplaces["claude-plugins-official"].source.path' "$(settings_file lsp)")"
+check "lsp: on for rust, loaded from its folder" rust-analyzer-lsp@claude-plugins-official "$(jq -r '.env.AGENT_HUB_PLUGINS' "$(settings_file lsp)")"
 check "lsp: second sync changes nothing" "" "$(sync_lsp lsp)"
 set_var lsp IMAGE agent-hub:web; sync_lsp lsp
-check "lsp: off without rust" null "$(jq -r '.enabledPlugins["rust-analyzer-lsp@claude-plugins-official"]' "$(settings_file lsp)")"
+check "lsp: off without rust" null "$(jq -r '.env.AGENT_HUB_PLUGINS' "$(settings_file lsp)")"
 check "lsp: harness stays on" 1 "$(jq -r '.env.AGENT_HUB_HARNESS' "$(settings_file lsp)")"
 rm -rf "$PLUGINS_DIR/claude-plugins-official"
 

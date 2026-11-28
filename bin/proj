@@ -23,6 +23,13 @@ CTR_TASKS=/var/agent-hub/tasks
 PLUGINS_DIR="$HUB/plugins"           # marketplace clones, mounted read-only at /opt/plugins
 HARNESS_MARKET=devsosin-harness      # marketplace at /opt/harness
 HARNESS_PLUGIN=harness@$HARNESS_MARKET  # loaded by agent-run --plugin-dir; on/off is AGENT_HUB_HARNESS in managed settings
+# Plugins with a local source folder are listed in env.AGENT_HUB_PLUGINS (agent-run --plugin-dir, image/plugin-dirs);
+# others stay managed plugins (enabledPlugins + extraKnownMarketplaces) and keep the copy Claude cached first.
+PLUGIN_JQ='def plugs: (.env.AGENT_HUB_PLUGINS // "") | split(" ") | map(select(. != ""));
+  def setplugs(l): if (l | length) == 0 then del(.env.AGENT_HUB_PLUGINS) else .env.AGENT_HUB_PLUGINS = (l | unique | join(" ")) end;
+  def tidy: (.enabledPlugins // {} | keys | map(sub("^.*@"; ""))) as $used
+    | if .extraKnownMarketplaces then .extraKnownMarketplaces |= with_entries(select(.key as $m | any($used[]; . == $m))) else . end;
+  '
 
 die() { echo "proj: $*" >&2; exit 1; }
 # Host git for GitHub over https with the host's gh login, also on machines without `gh auth setup-git`: gh repo clone
@@ -268,7 +275,7 @@ image_union() { # image_union <current> <needed>: our smallest image with both; 
 LSP_PLUGIN=rust-analyzer-lsp@claude-plugins-official
 sync_lsp() { # sync_lsp <name>
   local on m="${LSP_PLUGIN#*@}"
-  on="$(jq -r --arg p "$LSP_PLUGIN" '.enabledPlugins[$p] // false' "$(settings_file "$1")" 2>/dev/null || echo false)"
+  on="$(plugin_on "$1" "$LSP_PLUGIN" && echo true || echo false)"
   case "$(project_var "$1" IMAGE)" in
     agent-hub:rust|agent-hub:rust-web)
       [ "$on" != true ] || return 0
@@ -743,6 +750,16 @@ ensure_settings() { # the image's managed settings + env, with the project's pro
         elif (.extraKnownMarketplaces // {} | has($m)) then "0" else "1" end))
     | del(.enabledPlugins[$h], .extraKnownMarketplaces[$m])' "$f")"
   [ "$tmp" = "$(jq . "$f")" ] || printf '%s\n' "$tmp" > "$f"   # in place, see write_settings
+  # Plugins with a local source folder load the same way; older files had them as managed plugins.
+  local mv=""
+  for p in $(jq -r '.enabledPlugins // {} | to_entries[] | select(.value == true) | .key' "$f"); do
+    ! inline_plugin "$p" || mv="$mv $p"
+  done
+  if [ -n "$mv" ]; then
+    tmp="$(jq --arg l "$mv" "$PLUGIN_JQ"'($l | split(" ") | map(select(. != ""))) as $l | setplugs(plugs + $l)
+      | .enabledPlugins |= with_entries(select(.key as $k | any($l[]; . == $k) | not)) | tidy' "$f")"
+    printf '%s\n' "$tmp" > "$f"   # in place, see write_settings
+  fi
   p="$(profile_json "$n")" || die "bad settings profile for $1 (proj profile $1 <profile>)"
   # For the hooks (image/hooks), also in proj shell sessions: work log columns and the project folder.
   p="$(printf '%s' "$p" | jq -c --arg n "$n" --arg d "$d" '. + {env: {AGENT_HUB_PROFILE: $n, AGENT_HUB_PROJECT_DIR: $d}}')"
@@ -775,6 +792,13 @@ write_settings() { # write_settings <name> <jq args...> (input on stdin, so the 
   tmp="$(jq "$@" < "$f")"
   # In place, not mv: a single-file bind mount keeps the old inode, so a replaced file would not reach the container.
   printf '%s\n' "$tmp" > "$f"
+}
+
+inline_plugin() { # inline_plugin <plugin@marketplace>: true when it loads from its folder (not harness)
+  [ "${1#*@}" != "$HARNESS_MARKET" ] && "$REPO_DIR/image/plugin-dirs" "$PLUGINS_DIR/${1#*@}" "${1%@*}" >/dev/null
+}
+plugin_on() { # plugin_on <name> <plugin@marketplace>: listed or a managed plugin (harness has its own switch)
+  jq -e --arg p "$2" "$PLUGIN_JQ"'any(plugs[]; . == $p) or .enabledPlugins[$p] == true' "$(settings_file "$1")" >/dev/null 2>&1
 }
 
 market_dir() { # host folder of a marketplace usable by the project
@@ -844,8 +868,10 @@ plugin_add() { # plugin_add <name> <plugin@marketplace> [--env KEY=VALUE ...] (K
   m="${p#*@}"; dir="$(market_dir "$name" "$m")"
   jq -e --arg n "${p%@*}" 'any(.plugins[]; .name == $n)' "$dir/.claude-plugin/marketplace.json" >/dev/null 2>&1 \
     || die "no plugin ${p%@*} in marketplace $m (proj plugin source ls)"
-  write_settings "$name" --arg p "$p" --arg m "$m" --arg h "$HARNESS_MARKET" --arg hp "$HARNESS_PLUGIN" '
+  local i=0; ! inline_plugin "$p" || i=1
+  write_settings "$name" --arg p "$p" --arg m "$m" --arg hp "$HARNESS_PLUGIN" --arg i "$i" "$PLUGIN_JQ"'
     if $p == $hp then .env.AGENT_HUB_HARNESS = "1"
+    elif $i == "1" then setplugs(plugs + [$p]) | del(.enabledPlugins[$p]) | tidy
     else .enabledPlugins[$p] = true | .extraKnownMarketplaces[$m] = {source: {source: "directory", path: ("/opt/plugins/" + $m)}} end
     | .env = ((.env // {}) + ($ARGS.positional | map(capture("^(?<k>[^=]+)=(?<v>.*)$") | {(.k): .v}) | add // {})
              | with_entries(select(.value != "")))' --args ${envs[@]+"${envs[@]}"}
@@ -861,17 +887,15 @@ plugin_rm() { # plugin_rm <name> <plugin@marketplace>: drops the marketplace too
     write_settings "$name" '.env.AGENT_HUB_HARNESS = "0"'
     echo "$name: $p off from the next task"; return
   fi
-  jq -e --arg p "$p" '.enabledPlugins | has($p)' "$(settings_file "$name")" >/dev/null 2>&1 || die "$p is not on in $name"
-  write_settings "$name" --arg p "$p" --arg m "${p#*@}" --arg h "$HARNESS_MARKET" '
-    del(.enabledPlugins[$p])
-    | if $m == $h or any(.enabledPlugins | keys[]; endswith("@" + $m)) then . else del(.extraKnownMarketplaces[$m]) end'
+  plugin_on "$name" "$p" || die "$p is not on in $name"
+  write_settings "$name" --arg p "$p" "$PLUGIN_JQ"'setplugs(plugs - [$p]) | del(.enabledPlugins[$p]) | tidy'
   echo "$name: $p off from the next task (env options stay; clear one with add … --env KEY=)"
 }
 
 plugin_ls() {
   ensure_settings "$1"
-  jq -r --arg n "$1" --arg hp "$HARNESS_PLUGIN" '(.env // {} | del(.AGENT_HUB_PROFILE, .AGENT_HUB_PROJECT_DIR, .AGENT_HUB_HARNESS)) as $e   # set by bin/proj, not plugin options
-    | "\($n): \((if .env.AGENT_HUB_HARNESS == "0" then [] else [$hp] end) + (.enabledPlugins // {} | to_entries | map(select(.value) | .key)) | join(", "))"
+  jq -r --arg n "$1" --arg hp "$HARNESS_PLUGIN" "$PLUGIN_JQ"'(.env // {} | del(.AGENT_HUB_PROFILE, .AGENT_HUB_PROJECT_DIR, .AGENT_HUB_HARNESS, .AGENT_HUB_PLUGINS)) as $e   # set by bin/proj, not plugin options
+    | "\($n): \((if .env.AGENT_HUB_HARNESS == "0" then [] else [$hp] end) + plugs + (.enabledPlugins // {} | to_entries | map(select(.value) | .key)) | join(", "))"
     + (if $e == {} then "" else "  env: \($e | to_entries | map("\(.key)=\(.value)") | join(" "))" end)' \
     "$(settings_file "$1")"
 }

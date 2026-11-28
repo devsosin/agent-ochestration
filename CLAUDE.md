@@ -14,6 +14,7 @@ mac-agent/
 │   ├── settings/            # permission + hook profiles: common.json + one team file (dev, marketing), merged per project
 │   ├── hooks/               # guard (.env, folder, settings, secrets, merge gate) and worklog hooks → /usr/local/lib/agent-hub/hooks
 │   ├── agent-run            # loads token secrets, then execs claude with mcp.json
+│   ├── plugin-dirs          # harness + local-source plugins → agent-run --plugin-dir (no plugin cache)
 │   ├── mcp.json             # imagegen MCP at host.docker.internal:7801; mcp-web.json adds playwright (web, rust-web)
 │   ├── install-web          # Playwright MCP + Chromium + Korean fonts (web layer)
 │   ├── profile.sh           # exports tokens from /run/secrets for shells
@@ -37,7 +38,7 @@ Runtime state lives outside the repo (never commit it):
 | `~/.agent-hub/config` | optional overrides: `WORKSPACE_ROOT`, `HARNESS_DIR`, `DEFAULT_ACCOUNT`, `MAX_TASKS` |
 | `~/.agent-hub/accounts/<alias>/` | `claude.token`, `gh.token`, `git.env` — secrets, mode 700/600 |
 | `~/.agent-hub/projects/<name>.env` | compose variables for one project |
-| `~/.agent-hub/projects/<name>.managed-settings.json` | that project's plugins + `env` (`proj plugin`) + profile rules (`proj profile`), mounted read-only at `/etc/claude-code/managed-settings.json` |
+| `~/.agent-hub/projects/<name>.managed-settings.json` | that project's plugins (`env.AGENT_HUB_PLUGINS`, remote sources in `enabledPlugins`) + `env` (`proj plugin`) + profile rules (`proj profile`), mounted read-only at `/etc/claude-code/managed-settings.json` |
 | `~/.agent-hub/plugins/<marketplace>/` | plugin marketplace clones (`proj plugin source add`), mounted read-only at `/opt/plugins` |
 | `~/.agent-hub/tasks/<name>/<id>/` | `prompt.txt`, `log.jsonl`, `meta`, `pid`, `exit` (mounted at `/var/agent-hub/tasks` in that project's container), `transcript.md` (built on the host, `proj transcript`) |
 | `~/.agent-hub/sessions/<name>/` | Claude Code session files of that project's container (bind mount of `/home/node/.claude/projects`), source of `transcript.md` |

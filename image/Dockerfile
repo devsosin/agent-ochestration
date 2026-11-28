@@ -29,11 +29,12 @@ COPY managed-settings.json /etc/claude-code/managed-settings.json
 COPY gitconfig /etc/gitconfig
 COPY profile.sh /etc/profile.d/agent-hub.sh
 COPY agent-run /usr/local/bin/agent-run
+COPY plugin-dirs /usr/local/lib/agent-hub/plugin-dirs
 COPY install-web /usr/local/lib/agent-hub/install-web
 COPY mcp.json /etc/agent-hub/mcp.json
 # Hooks the settings profiles point at (image/settings/common.json).
 COPY hooks/ /usr/local/lib/agent-hub/hooks/
-RUN chmod 755 /usr/local/bin/agent-run /usr/local/lib/agent-hub/install-web /usr/local/lib/agent-hub/hooks/* \
+RUN chmod 755 /usr/local/bin/agent-run /usr/local/lib/agent-hub/plugin-dirs /usr/local/lib/agent-hub/install-web /usr/local/lib/agent-hub/hooks/* \
  && echo '. /etc/profile.d/agent-hub.sh' >> /etc/bash.bashrc \
  # Mount points owned by node so named volumes copy that ownership on first mount.
  && install -d -o node -g node /home/node/.claude /usr/local/cargo/registry /usr/local/cargo/git /var/agent-hub/tasks
