@@ -1,0 +1,26 @@
+#!/bin/sh
+# plugin-dirs: the folders agent-run passes to claude --plugin-dir, one per line: harness (unless env.AGENT_HUB_HARNESS
+# is 0) and each plugin in env.AGENT_HUB_PLUGINS of the managed settings. They load from the checkouts on every run
+# because Claude's plugin cache keeps the first copy it installed, even across versions.
+# plugin-dirs <marketplace folder> <plugin>: that plugin's folder (bin/proj uses it on the host too), or exit 1 when
+# its source is not a local folder (git-subdir, url, github) or it is strict:false without a plugin.json (its parts
+# are then only in marketplace.json, which --plugin-dir does not read).
+# AGENT_HUB_SETTINGS and AGENT_HUB_OPT override the container paths (tests).
+plugin_dir() {
+  r="$(jq -er --arg n "$2" '.metadata.pluginRoot as $root | first(.plugins[] | select(.name == $n))
+    | select(.source | type == "string")
+    | "\(.strict != false) " + (if .source | test("^\\.\\.?/") then .source else ($root // ".") + "/" + .source end)' \
+    "$1/.claude-plugin/marketplace.json" 2>/dev/null)" || return 1
+  d="$1/${r#* }"
+  [ -d "$d" ] && { [ "${r%% *}" = true ] || [ -f "$d/.claude-plugin/plugin.json" ]; } || return 1
+  (cd "$d" && pwd)
+}
+
+if [ $# -gt 0 ]; then plugin_dir "$@"; exit; fi
+s="${AGENT_HUB_SETTINGS:-/etc/claude-code/managed-settings.json}"; o="${AGENT_HUB_OPT:-/opt}"
+h="$(jq -r '.env.AGENT_HUB_HARNESS // "1"' "$s" 2>/dev/null || echo 1)"
+if [ "$h" != 0 ] && [ -d "$o/harness/plugins" ]; then echo "$o/harness/plugins"; fi
+for p in $(jq -r '.env.AGENT_HUB_PLUGINS // ""' "$s" 2>/dev/null); do
+  plugin_dir "$o/plugins/${p#*@}" "${p%@*}" \
+    || echo "agent-run: $p is not a local plugin folder under $o/plugins, skipped (proj plugin source ls)" >&2
+done
