@@ -398,4 +398,9 @@ check "dc makes an empty secret for projects without knowledge" "-rw------- 0" "
 check "no knowledge: server not joined" 0 "$(grep -c '^network connect proj-kn_default' "$dlog" || true)"
 unset -f docker; KNOWLEDGE_REPO=
 
+# Host pulls of GitHub repos use the host's gh login (no `gh auth setup-git` needed).
+if command -v gh >/dev/null 2>&1; then
+  check "host git: gh credential helper for github.com" "!$(command -v gh) auth git-credential" "$(host_git config --get credential.https://github.com.helper)"
+fi
+
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

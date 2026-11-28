@@ -24,6 +24,12 @@ PLUGINS_DIR="$HUB/plugins"           # marketplace clones, mounted read-only at 
 HARNESS_MARKET=devsosin-harness      # marketplace at /opt/harness (image/managed-settings.json)
 
 die() { echo "proj: $*" >&2; exit 1; }
+# Host git for GitHub over https with the host's gh login, also on machines without `gh auth setup-git`: gh repo clone
+# passes its token only to the clone itself, so later pulls would ask for a username (and fail, prompts being off).
+host_git() {
+  local gh; gh="$(command -v gh || true)"
+  if [ -n "$gh" ]; then git -c "credential.https://github.com.helper=!$gh auth git-credential" "$@"; else git "$@"; fi
+}
 tilde() { case "$1" in "$HOME"/*) printf '~%s' "${1#"$HOME"}" ;; *) printf '%s' "$1" ;; esac; }  # for display only
 
 # --- names --------------------------------------------------------------------
@@ -276,7 +282,7 @@ fetch_repo() { # fetch_repo <dir> <repo: URL | owner/name | ""> <create: "" | pr
   if [ -n "$repo" ]; then
     [ ! -e "$dir" ] || die "$dir exists; drop --repo to adopt it"
     case "$repo" in
-      *://*|git@*) git clone "$repo" "$dir" ;;
+      *://*|git@*) host_git clone "$repo" "$dir" ;;
       */*) gh repo clone "$repo" "$dir" ;;   # host gh login, so private repos work too
       *) die "--repo takes a URL or owner/name: $repo" ;;
     esac
@@ -362,7 +368,7 @@ refs_override() { # refs_override <name>: writes the compose file mounting the p
 pull_ref() { # pull_ref <repo>: fast-forwards the clone; warns instead of prompting, and gives up on a stalled transfer
   # shortcut: no timeout on connecting (macOS has no timeout(1)); add one if a dead remote ever hangs task starts.
   GIT_TERMINAL_PROMPT=0 GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=20 \
-    git -C "$REFS_DIR/$1" pull -q --ff-only >&2 2>&1 \
+    host_git -C "$REFS_DIR/$1" pull -q --ff-only >&2 2>&1 \
     || { echo "proj: warning: could not update reference repo $1; using it as is" >&2; return 1; }
 }
 
@@ -774,7 +780,7 @@ plugin_source() { # proj plugin source add <owner/repo|URL> | update [marketplac
       [ -n "${2:-}" ] || die "usage: proj plugin source add <owner/repo|URL>"
       tmp="$(mktemp -d "$PLUGINS_DIR/.add.XXXXXX")"
       case "$2" in
-        *://*|git@*) git clone -q "$2" "$tmp/r" ;;
+        *://*|git@*) host_git clone -q "$2" "$tmp/r" ;;
         */*) gh repo clone "$2" "$tmp/r" -- -q ;;
         *) false ;;
       esac || { rm -rf "$tmp"; die "could not clone $2 (owner/repo or URL)"; }
@@ -788,7 +794,7 @@ plugin_source() { # proj plugin source add <owner/repo|URL> | update [marketplac
       for d in "$PLUGINS_DIR"/*/; do
         d="${d%/}"; [ -d "$d" ] || continue
         [ -z "${2:-}" ] || [ "$(basename "$d")" = "$2" ] || continue
-        echo "== $(basename "$d")"; git -C "$d" pull -q --ff-only && git -C "$d" log -1 --format='%h %s'
+        echo "== $(basename "$d")"; host_git -C "$d" pull -q --ff-only && git -C "$d" log -1 --format='%h %s'
       done ;;
     ls)
       for d in "$PLUGINS_DIR"/*/; do

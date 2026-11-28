@@ -144,6 +144,7 @@
 | clone | `$WORKSPACE_ROOT/refs/<repo>` — 프로젝트 checkout과 따로 둔 전용 clone, 기본 브랜치에 둠. `owner/repo`는 호스트 `gh`, URL은 `git clone`. 같은 이름의 다른 저장소면 거부 |
 | 마운트 | 연결한 프로젝트 컨테이너에만 `/refs/<repo>` 읽기 전용(쓰기는 `Read-only file system`). 목록은 `~/.agent-hub/projects/<name>.env`의 `REFS`, compose 추가 파일 `<name>.refs.yml`은 `proj`가 매번 만듦. 다른 계정 프로젝트에는 안 보임 |
 | 갱신 | `proj task`·`proj reply`가 작업을 띄우기 직전에 호스트에서 `git pull --ff-only`. 실패(원격 막힘, 잠금)하면 경고만 하고 작업은 진행. 수동은 `proj ref update [repo]` |
+| 인증 | 호스트의 clone·pull(참고 저장소, 지식 저장소, 플러그인 소스, `--repo` URL)은 github.com https에 호스트 `gh` 로그인을 인증 도우미로 붙여 실행(`gh auth setup-git` 없이도 비공개 저장소 pull 가능) |
 | 안내 | 작업 지시문에는 넣지 않음. 워크스페이스 CLAUDE.md의 "참고 저장소" 절에 적음(`harness:workspace-claude-md`). `proj ref add`가 넣을 한 줄을 출력 |
 | 이름 | 프로젝트 이름 `refs`는 쓸 수 없음(같은 폴더) |
 | clone 삭제 | 자동으로 지우지 않음. `proj ref ls`에서 쓰는 프로젝트가 없으면 폴더를 지움 |
